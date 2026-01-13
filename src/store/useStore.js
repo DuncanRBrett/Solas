@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createDefaultProfile } from '../models/defaults';
+import { createBackup } from '../utils/backup';
 
 // Multi-profile Zustand store
 const useStore = create((set, get) => ({
@@ -153,7 +154,17 @@ const useStore = create((set, get) => ({
     const { currentProfileName, profile } = get();
     if (profile) {
       profile.updatedAt = new Date().toISOString();
+
+      // Save main profile
       localStorage.setItem(`solas_profile_${currentProfileName}`, JSON.stringify(profile));
+
+      // Create automatic backup
+      const backupResult = createBackup(currentProfileName, profile);
+      if (!backupResult.success) {
+        console.error('Backup failed:', backupResult.error);
+        // Don't fail the save, but log the error
+        // User will be notified via console, and we can add UI notifications later
+      }
     }
   },
 
