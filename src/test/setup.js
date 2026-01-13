@@ -1,4 +1,4 @@
-import { expect, afterEach, vi } from 'vitest';
+import { expect, afterEach, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 
@@ -10,19 +10,42 @@ afterEach(() => {
   cleanup();
 });
 
-// Mock localStorage
-const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-};
-global.localStorage = localStorageMock;
+// Create a functional localStorage mock
+class LocalStorageMock {
+  constructor() {
+    this.store = {};
+  }
 
-// Reset localStorage mocks before each test
+  clear() {
+    this.store = {};
+  }
+
+  getItem(key) {
+    return this.store[key] || null;
+  }
+
+  setItem(key, value) {
+    this.store[key] = String(value);
+  }
+
+  removeItem(key) {
+    delete this.store[key];
+  }
+
+  key(index) {
+    const keys = Object.keys(this.store);
+    return keys[index] || null;
+  }
+
+  get length() {
+    return Object.keys(this.store).length;
+  }
+}
+
+// Create and assign localStorage mock
+global.localStorage = new LocalStorageMock();
+
+// Reset localStorage before each test
 beforeEach(() => {
-  localStorageMock.getItem.mockClear();
-  localStorageMock.setItem.mockClear();
-  localStorageMock.removeItem.mockClear();
-  localStorageMock.clear.mockClear();
+  global.localStorage.clear();
 });
