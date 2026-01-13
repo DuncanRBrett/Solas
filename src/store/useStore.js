@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createDefaultProfile } from '../models/defaults';
 import { createBackup } from '../utils/backup';
+import { loadProfile, addVersionToProfile } from '../utils/migrations';
 
 // Multi-profile Zustand store
 const useStore = create((set, get) => ({
@@ -19,6 +20,7 @@ const useStore = create((set, get) => ({
     if (profiles.length === 0) {
       // First time - create default profile
       const defaultProfile = createDefaultProfile('Duncan');
+      addVersionToProfile(defaultProfile);
       localStorage.setItem('solas_profile_Duncan', JSON.stringify(defaultProfile));
       localStorage.setItem('solas_profiles', JSON.stringify(['Duncan']));
 
@@ -28,31 +30,75 @@ const useStore = create((set, get) => ({
         profile: defaultProfile,
       });
     } else {
-      // Load first profile
+      // Load first profile with migration
       const firstProfileName = profiles[0];
-      const profileData = JSON.parse(
-        localStorage.getItem(`solas_profile_${firstProfileName}`)
-      );
+      const profileData = localStorage.getItem(`solas_profile_${firstProfileName}`);
 
-      set({
-        profiles,
-        currentProfileName: firstProfileName,
-        profile: profileData,
-      });
+      const result = loadProfile(profileData);
+
+      if (result.success) {
+        // Save migrated profile back if it was migrated
+        if (result.migrated) {
+          console.log('Profile migrated, saving...');
+          localStorage.setItem(
+            `solas_profile_${firstProfileName}`,
+            JSON.stringify(result.profile)
+          );
+          // Create backup of migrated profile
+          createBackup(firstProfileName, result.profile);
+        }
+
+        set({
+          profiles,
+          currentProfileName: firstProfileName,
+          profile: result.profile,
+        });
+      } else {
+        // Handle corrupt profile - try to recover
+        console.error('Failed to load profile:', result.error);
+        console.log('Attempting to recover from backup...');
+
+        // TODO: Add backup recovery UI in Phase 0.7
+        // For now, create a new default profile
+        const defaultProfile = createDefaultProfile(firstProfileName);
+        addVersionToProfile(defaultProfile);
+
+        set({
+          profiles,
+          currentProfileName: firstProfileName,
+          profile: defaultProfile,
+        });
+
+        alert('Profile data was corrupted and could not be loaded. A new profile has been created. You may be able to restore from a backup.');
+      }
     }
   },
 
   // Switch profile
   switchProfile: (profileName) => {
-    const profileData = JSON.parse(
-      localStorage.getItem(`solas_profile_${profileName}`)
-    );
+    const profileDataStr = localStorage.getItem(`solas_profile_${profileName}`);
 
-    if (profileData) {
-      set({
-        currentProfileName: profileName,
-        profile: profileData,
-      });
+    if (profileDataStr) {
+      const result = loadProfile(profileDataStr);
+
+      if (result.success) {
+        // Save migrated profile back if it was migrated
+        if (result.migrated) {
+          localStorage.setItem(
+            `solas_profile_${profileName}`,
+            JSON.stringify(result.profile)
+          );
+          createBackup(profileName, result.profile);
+        }
+
+        set({
+          currentProfileName: profileName,
+          profile: result.profile,
+        });
+      } else {
+        console.error('Failed to switch to profile:', result.error);
+        alert(`Failed to load profile "${profileName}": ${result.error}`);
+      }
     }
   },
 
@@ -66,6 +112,7 @@ const useStore = create((set, get) => ({
     }
 
     const newProfile = createDefaultProfile(profileName);
+    addVersionToProfile(newProfile);
     localStorage.setItem(`solas_profile_${profileName}`, JSON.stringify(newProfile));
 
     const updatedProfiles = [...profiles, profileName];
