@@ -209,7 +209,7 @@ export const canMigrate = (fromVersion, toVersion = CURRENT_DATA_VERSION) => {
 
   // Check if migration exists
   const migrationKey = `${fromVersion}_to_${toVersion}`;
-  return migrations.hasOwnProperty(migrationKey);
+  return Object.prototype.hasOwnProperty.call(migrations, migrationKey);
 };
 
 /**
