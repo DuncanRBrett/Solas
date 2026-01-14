@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import {
   createDefaultAsset,
@@ -84,13 +85,33 @@ function Assets() {
   };
 
   const handleSave = () => {
+    let result;
+
     if (editingAsset) {
-      updateAsset(editingAsset, formData);
-      setEditingAsset(null);
+      result = updateAsset(editingAsset, formData);
     } else {
-      addAsset(formData);
-      setIsAdding(false);
+      result = addAsset(formData);
     }
+
+    // Check validation result
+    if (!result.success) {
+      // Show validation errors
+      toast.error(result.message, {
+        duration: 6000,
+        style: {
+          maxWidth: '500px',
+        },
+      });
+      console.error('Asset validation failed:', result.errors);
+      return; // Don't close form or clear data
+    }
+
+    // Success!
+    toast.success(editingAsset ? 'Asset updated successfully' : 'Asset added successfully');
+
+    // Clear form and close
+    setEditingAsset(null);
+    setIsAdding(false);
     setFormData(createDefaultAsset());
   };
 

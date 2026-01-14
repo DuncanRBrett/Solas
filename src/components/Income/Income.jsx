@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import {
   createDefaultIncome,
@@ -117,13 +118,23 @@ function Income() {
   };
 
   const handleSave = () => {
+    let result;
+
     if (editingIncome) {
-      updateIncome(editingIncome, formData);
-      setEditingIncome(null);
+      result = updateIncome(editingIncome, formData);
     } else {
-      addIncome(formData);
-      setIsAdding(false);
+      result = addIncome(formData);
     }
+
+    if (!result.success) {
+      toast.error(result.message, { duration: 6000, style: { maxWidth: '500px' } });
+      console.error('Income validation failed:', result.errors);
+      return;
+    }
+
+    toast.success(editingIncome ? 'Income updated successfully' : 'Income added successfully');
+    setEditingIncome(null);
+    setIsAdding(false);
     setFormData(createDefaultIncome());
   };
 

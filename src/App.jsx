@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
 import Dashboard from './components/Dashboard/Dashboard';
 import Assets from './components/Assets/Assets';
@@ -67,9 +68,34 @@ function App() {
   };
 
   return (
-    <div className="app">
-      {/* Header */}
-      <header className="app-header">
+    <>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#333',
+            color: '#fff',
+          },
+          success: {
+            duration: 3000,
+            iconTheme: {
+              primary: '#4ade80',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            duration: 5000,
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
+      <div className="app">
+        {/* Header */}
+        <header className="app-header">
         <div className="header-left">
           <h1>Solas v3</h1>
           <span className="tagline">Retirement Planning</span>
@@ -198,6 +224,7 @@ function App() {
         <span>Profile: {currentProfileName} | Last updated: {new Date(profile.updatedAt).toLocaleString()}</span>
       </footer>
     </div>
+    </>
   );
 }
 

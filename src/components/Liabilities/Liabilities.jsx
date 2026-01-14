@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import {
   createDefaultLiability,
@@ -62,13 +63,23 @@ function Liabilities() {
   };
 
   const handleSave = () => {
+    let result;
+
     if (editingLiability) {
-      updateLiability(editingLiability, formData);
-      setEditingLiability(null);
+      result = updateLiability(editingLiability, formData);
     } else {
-      addLiability(formData);
-      setIsAdding(false);
+      result = addLiability(formData);
     }
+
+    if (!result.success) {
+      toast.error(result.message, { duration: 6000, style: { maxWidth: '500px' } });
+      console.error('Liability validation failed:', result.errors);
+      return;
+    }
+
+    toast.success(editingLiability ? 'Liability updated successfully' : 'Liability added successfully');
+    setEditingLiability(null);
+    setIsAdding(false);
     setFormData(createDefaultLiability());
   };
 

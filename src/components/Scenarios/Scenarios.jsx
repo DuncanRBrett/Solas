@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -88,13 +89,23 @@ function Scenarios() {
   };
 
   const handleSave = () => {
+    let result;
+
     if (editingScenario) {
-      updateScenario(editingScenario, formData);
-      setEditingScenario(null);
+      result = updateScenario(editingScenario, formData);
     } else {
-      addScenario(formData);
-      setIsAdding(false);
+      result = addScenario(formData);
     }
+
+    if (!result.success) {
+      toast.error(result.message, { duration: 6000, style: { maxWidth: '500px' } });
+      console.error('Scenario validation failed:', result.errors);
+      return;
+    }
+
+    toast.success(editingScenario ? 'Scenario updated successfully' : 'Scenario added successfully');
+    setEditingScenario(null);
+    setIsAdding(false);
     setFormData(createDefaultScenario());
   };
 
