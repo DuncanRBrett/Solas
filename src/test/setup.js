@@ -43,9 +43,11 @@ class LocalStorageMock {
 }
 
 // Create and assign localStorage mock
+// eslint-disable-next-line no-undef
 global.localStorage = new LocalStorageMock();
 
 // Reset localStorage before each test
 beforeEach(() => {
+  // eslint-disable-next-line no-undef
   global.localStorage.clear();
 });

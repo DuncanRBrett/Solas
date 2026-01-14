@@ -67,7 +67,7 @@ export const createBackup = (profileName, profileData) => {
         cleanOldBackups(profileName, true); // Aggressive cleanup
         localStorage.setItem(backupKey, JSON.stringify(backup));
         return { success: true, backupKey, warning: 'Had to delete old backups due to storage limit' };
-      } catch (retryError) {
+      } catch {
         return { success: false, error: 'Storage quota exceeded. Please export your data and clear old backups.' };
       }
     }
@@ -130,7 +130,7 @@ export const getBackups = (profileName) => {
           isValid: verification.valid,
           invalidReason: verification.reason,
         };
-      } catch (error) {
+      } catch {
         return {
           key,
           timestamp: 0,
