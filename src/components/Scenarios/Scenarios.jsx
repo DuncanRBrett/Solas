@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import { createDefaultScenario } from '../../models/defaults';
 import { runScenario } from '../../services/scenarioCalculations';
 import { formatCurrency, formatPercentage, toZAR, formatInReportingCurrency, toLegacyExchangeRates } from '../../utils/calculations';
@@ -39,6 +40,7 @@ function Scenarios() {
   const [compareMode, setCompareMode] = useState(false);
   const [selectedForComparison, setSelectedForComparison] = useState([]);
   const [formData, setFormData] = useState(createDefaultScenario());
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   const { scenarios, settings, expenses, expenseCategories = [] } = profile;
   // Use legacy format for backward compatibility with existing calculations
@@ -115,9 +117,17 @@ function Scenarios() {
     setFormData(createDefaultScenario());
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Are you sure you want to delete this scenario?')) {
+  const handleDelete = async (id) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Scenario',
+      message: 'Are you sure you want to delete this scenario? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteScenario(id);
+      toast.success('Scenario deleted successfully');
       if (selectedScenario?.id === id) {
         setSelectedScenario(null);
       }
@@ -215,6 +225,8 @@ function Scenarios() {
 
   return (
     <div className="scenarios">
+      {confirmDialog}
+
       <div className="scenarios-header">
         <h2>Scenarios ({scenarios.length})</h2>
         <div className="header-actions">

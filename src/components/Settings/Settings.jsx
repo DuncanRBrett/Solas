@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   ALL_CURRENCIES,
   DEFAULT_PLATFORMS,
@@ -22,6 +23,7 @@ import './Settings.css';
 
 function Settings() {
   const { profile, updateSettings, setAssets, addAsset, deleteProfile, profiles } = useStore();
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   // Migrate legacy exchange rates if needed
   const migratedExchangeRates = profile.settings.exchangeRates && !profile.settings.exchangeRates['USD/ZAR']
@@ -169,8 +171,15 @@ function Settings() {
     }));
   };
 
-  const handleResetPlatforms = () => {
-    if (confirm('Reset platforms to default list?')) {
+  const handleResetPlatforms = async () => {
+    const confirmed = await showConfirm({
+      title: 'Reset Platforms',
+      message: 'Reset platforms to default list? This will replace your custom platform list.',
+      confirmText: 'Reset',
+      variant: 'warning',
+    });
+
+    if (confirmed) {
       setSettings(prev => ({
         ...prev,
         platforms: [...DEFAULT_PLATFORMS],
@@ -257,6 +266,8 @@ function Settings() {
 
   return (
     <div className="settings">
+      {confirmDialog}
+
       <h2>Settings</h2>
 
       {/* Import/Export Section */}
@@ -631,8 +642,15 @@ function Settings() {
         <div style={{ marginTop: '1rem' }}>
           <button
             className="btn-secondary"
-            onClick={() => {
-              if (confirm('Reset target allocation to defaults?')) {
+            onClick={async () => {
+              const confirmed = await showConfirm({
+                title: 'Reset Target Allocation',
+                message: 'Reset target allocation to default values? This will replace your custom allocation targets.',
+                confirmText: 'Reset',
+                variant: 'warning',
+              });
+
+              if (confirmed) {
                 setSettings(prev => ({
                   ...prev,
                   targetAllocation: { ...DEFAULT_SETTINGS.targetAllocation }
@@ -771,8 +789,15 @@ function Settings() {
         <div style={{ marginTop: '1rem' }}>
           <button
             className="btn-secondary"
-            onClick={() => {
-              if (confirm('Reset thresholds to defaults?')) {
+            onClick={async () => {
+              const confirmed = await showConfirm({
+                title: 'Reset Thresholds',
+                message: 'Reset concentration thresholds to default values? This will replace your custom threshold settings.',
+                confirmText: 'Reset',
+                variant: 'warning',
+              });
+
+              if (confirmed) {
                 setSettings(prev => ({
                   ...prev,
                   thresholds: { ...DEFAULT_SETTINGS.thresholds }

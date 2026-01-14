@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   createDefaultAsset,
   ASSET_CLASSES,
@@ -35,6 +36,7 @@ function Assets() {
   const [formData, setFormData] = useState(createDefaultAsset());
   const [sortBy, setSortBy] = useState('name'); // name, assetClass, platform, value, gainPct
   const [sortDirection, setSortDirection] = useState('asc'); // asc, desc
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   const { assets, settings } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
@@ -121,9 +123,17 @@ function Assets() {
     setFormData(createDefaultAsset());
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Are you sure you want to delete this asset?')) {
+  const handleDelete = async (id) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Asset',
+      message: 'Are you sure you want to delete this asset? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteAsset(id);
+      toast.success('Asset deleted successfully');
     }
   };
 
@@ -177,6 +187,8 @@ function Assets() {
 
   return (
     <div className="assets">
+      {confirmDialog}
+
       <div className="assets-header">
         <h2>Assets ({assets.length})</h2>
         <button className="btn-primary" onClick={handleAdd}>

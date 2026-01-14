@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   createDefaultIncome,
   DEFAULT_ENABLED_CURRENCIES,
@@ -24,6 +25,7 @@ function Income() {
   const [editingIncome, setEditingIncome] = useState(null);
   const [formData, setFormData] = useState(createDefaultIncome());
   const [showDividendIncome, setShowDividendIncome] = useState(false);
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   const { income, assets, settings } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
@@ -144,9 +146,17 @@ function Income() {
     setFormData(createDefaultIncome());
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Are you sure you want to delete this income source?')) {
+  const handleDelete = async (id) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Income Source',
+      message: 'Are you sure you want to delete this income source? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteIncome(id);
+      toast.success('Income source deleted successfully');
     }
   };
 
@@ -183,6 +193,8 @@ function Income() {
 
   return (
     <div className="income">
+      {confirmDialog}
+
       <div className="income-header">
         <h2>Income Sources ({income.length})</h2>
         <button className="btn-primary" onClick={handleAdd}>

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   createDefaultLiability,
   PLATFORMS,
@@ -19,6 +20,7 @@ function Liabilities() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingLiability, setEditingLiability] = useState(null);
   const [formData, setFormData] = useState(createDefaultLiability());
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   const { liabilities, settings } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
@@ -89,9 +91,17 @@ function Liabilities() {
     setFormData(createDefaultLiability());
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Are you sure you want to delete this liability?')) {
+  const handleDelete = async (id) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Liability',
+      message: 'Are you sure you want to delete this liability? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
       deleteLiability(id);
+      toast.success('Liability deleted successfully');
     }
   };
 
@@ -110,6 +120,8 @@ function Liabilities() {
 
   return (
     <div className="liabilities">
+      {confirmDialog}
+
       <div className="liabilities-header">
         <h2>Liabilities ({liabilities.length})</h2>
         <button className="btn-primary" onClick={handleAdd}>

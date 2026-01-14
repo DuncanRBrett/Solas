@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
+import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   createDefaultExpenseCategory,
   createDefaultExpenseSubcategory,
@@ -32,6 +34,7 @@ function ExpensesV2() {
     updateSubcategory,
     deleteSubcategory,
   } = useStore();
+  const { confirmDialog, showConfirm } = useConfirmDialog();
 
   const { expenseCategories = [], settings } = profile;
   const reportingCurrency = settings?.reportingCurrency || 'ZAR';
@@ -154,16 +157,19 @@ function ExpensesV2() {
     setEditingCategory(null);
   };
 
-  const handleDeleteCategory = (categoryId) => {
+  const handleDeleteCategory = async (categoryId) => {
     const category = expenseCategories.find((c) => c.id === categoryId);
-    if (
-      !confirm(
-        `Delete category "${category.name}" and all its ${category.subcategories.length} subcategories?`
-      )
-    ) {
-      return;
+    const confirmed = await showConfirm({
+      title: 'Delete Category',
+      message: `Delete category "${category.name}" and all its ${category.subcategories.length} subcategories? This action cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
+      deleteExpenseCategory(categoryId);
+      toast.success('Category deleted successfully');
     }
-    deleteExpenseCategory(categoryId);
   };
 
   // Subcategory Management
@@ -199,9 +205,18 @@ function ExpensesV2() {
     setSelectedCategoryId(null);
   };
 
-  const handleDeleteSubcategory = (categoryId, subcategoryId) => {
-    if (!confirm('Delete this expense?')) return;
-    deleteSubcategory(categoryId, subcategoryId);
+  const handleDeleteSubcategory = async (categoryId, subcategoryId) => {
+    const confirmed = await showConfirm({
+      title: 'Delete Expense',
+      message: 'Are you sure you want to delete this expense? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+
+    if (confirmed) {
+      deleteSubcategory(categoryId, subcategoryId);
+      toast.success('Expense deleted successfully');
+    }
   };
 
   // Import/Export
@@ -220,11 +235,14 @@ function ExpensesV2() {
       try {
         const importedCategories = await importExpensesFromExcel(file);
 
-        if (
-          !confirm(
-            `Import ${importedCategories.length} categories? This will replace your current expense categories.`
-          )
-        ) {
+        const confirmed = await showConfirm({
+          title: 'Import Expenses',
+          message: `Import ${importedCategories.length} categories? This will replace your current expense categories.`,
+          confirmText: 'Import',
+          variant: 'warning',
+        });
+
+        if (!confirmed) {
           return;
         }
 
@@ -263,6 +281,8 @@ function ExpensesV2() {
 
   return (
     <div className="expenses">
+      {confirmDialog}
+
       <div className="expenses-header">
         <h2>Expense Management</h2>
         <div className="expense-actions">
