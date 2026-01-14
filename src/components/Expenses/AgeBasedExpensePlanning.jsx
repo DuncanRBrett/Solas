@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { formatCurrency } from '../../utils/calculations';
 import './Expenses.css';
@@ -81,7 +82,7 @@ function AgeBasedExpensePlanning({ onClose }) {
     };
 
     updateAgeBasedExpensePlan(plan);
-    alert('Age-based expense plan saved!');
+    toast.success('Age-based expense plan saved!');
     onClose();
   };
 

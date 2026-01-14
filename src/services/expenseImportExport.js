@@ -30,8 +30,7 @@ export const exportExpensesToExcel = (expenseCategories, profileName = 'Profile'
   });
 
   if (data.length === 0) {
-    alert('No expenses to export');
-    return;
+    throw new Error('No expenses to export');
   }
 
   // Create workbook and worksheet

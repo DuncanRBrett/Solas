@@ -142,7 +142,7 @@ function ExpensesV2() {
 
   const handleSaveCategory = () => {
     if (!categoryFormData.name.trim()) {
-      alert('Please enter a category name');
+      toast.error('Please enter a category name');
       return;
     }
 
@@ -189,7 +189,7 @@ function ExpensesV2() {
 
   const handleSaveSubcategory = () => {
     if (!subcategoryFormData.name.trim()) {
-      alert('Please enter a subcategory name');
+      toast.error('Please enter a subcategory name');
       return;
     }
 
@@ -221,7 +221,12 @@ function ExpensesV2() {
 
   // Import/Export
   const handleExport = () => {
-    exportExpensesToExcel(expenseCategories, profile.name);
+    try {
+      exportExpensesToExcel(expenseCategories, profile.name);
+      toast.success('Expenses exported successfully');
+    } catch (error) {
+      toast.error(error.message);
+    }
   };
 
   const handleImport = () => {
@@ -250,10 +255,10 @@ function ExpensesV2() {
         profile.expenseCategories = importedCategories;
         useStore.getState().saveProfile();
 
-        alert(`Successfully imported ${importedCategories.length} expense categories!`);
+        toast.success(`Successfully imported ${importedCategories.length} expense categories!`);
         window.location.reload(); // Reload to reflect changes
       } catch (error) {
-        alert(`Import failed: ${error.message}`);
+        toast.error(`Import failed: ${error.message}`);
       }
     };
     input.click();

@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
@@ -55,7 +56,7 @@ function Settings() {
 
   const handleSave = () => {
     updateSettings(settings);
-    alert('Settings saved successfully!');
+    toast.success('Settings saved successfully!');
   };
 
   const handleDeleteProfile = () => {
@@ -124,7 +125,7 @@ function Settings() {
 
     // Don't allow disabling the reporting currency
     if (currencyCode === settings.reportingCurrency) {
-      alert('Cannot disable the reporting currency. Change reporting currency first.');
+      toast.error('Cannot disable the reporting currency. Change reporting currency first.');
       return;
     }
 
@@ -210,17 +211,17 @@ function Settings() {
 
       if (importMode === 'replace') {
         setAssets(assets);
-        alert(`Successfully imported ${assets.length} assets (replaced existing)`);
+        toast.success(`Successfully imported ${assets.length} assets (replaced existing)`);
       } else {
         // Merge mode - add to existing
         assets.forEach(asset => addAsset(asset));
-        alert(`Successfully imported ${assets.length} assets (added to existing)`);
+        toast.success(`Successfully imported ${assets.length} assets (added to existing)`);
       }
 
       // Reset file input
       e.target.value = '';
     } catch (error) {
-      alert('Error importing assets: ' + error.message);
+      toast.error('Error importing assets: ' + error.message);
       console.error(error);
     }
   };
@@ -254,12 +255,12 @@ function Settings() {
 
       setSettings(mergedSettings);
       updateSettings(mergedSettings);
-      alert('Settings imported successfully!');
+      toast.success('Settings imported successfully!');
 
       // Reset file input
       e.target.value = '';
     } catch (error) {
-      alert('Error importing settings: ' + error.message);
+      toast.error('Error importing settings: ' + error.message);
       console.error(error);
     }
   };
