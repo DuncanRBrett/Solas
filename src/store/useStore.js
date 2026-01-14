@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import { createDefaultProfile } from '../models/defaults';
 import { createBackup } from '../utils/backup';
 import { loadProfile, addVersionToProfile } from '../utils/migrations';
+import {
+  AssetSchema,
+  LiabilitySchema,
+  IncomeSchema,
+  ExpenseSchema,
+  ScenarioSchema,
+  validateData,
+  formatValidationErrors,
+} from '../models/validation';
 
 // Multi-profile Zustand store
 const useStore = create((set, get) => ({
@@ -228,13 +237,23 @@ const useStore = create((set, get) => ({
 
   // Assets
   addAsset: (asset) => {
+    // Validate asset before adding
+    const result = validateData(AssetSchema, asset);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Asset validation failed:', errorMsg);
+      // Return error for UI to handle
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
-        assets: [...state.profile.assets, asset],
+        assets: [...state.profile.assets, result.data],
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   setAssets: (assets) => {
@@ -248,15 +267,32 @@ const useStore = create((set, get) => ({
   },
 
   updateAsset: (id, updates) => {
+    // Find the asset and create updated version
+    const currentAsset = get().profile.assets.find(a => a.id === id);
+    if (!currentAsset) {
+      return { success: false, message: 'Asset not found' };
+    }
+
+    const updatedAsset = { ...currentAsset, ...updates };
+
+    // Validate updated asset
+    const result = validateData(AssetSchema, updatedAsset);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Asset validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
         assets: state.profile.assets.map((a) =>
-          a.id === id ? { ...a, ...updates } : a
+          a.id === id ? result.data : a
         ),
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteAsset: (id) => {
@@ -271,25 +307,48 @@ const useStore = create((set, get) => ({
 
   // Liabilities
   addLiability: (liability) => {
+    // Validate liability before adding
+    const result = validateData(LiabilitySchema, liability);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Liability validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
-        liabilities: [...state.profile.liabilities, liability],
+        liabilities: [...state.profile.liabilities, result.data],
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   updateLiability: (id, updates) => {
+    const currentLiability = get().profile.liabilities.find(l => l.id === id);
+    if (!currentLiability) {
+      return { success: false, message: 'Liability not found' };
+    }
+
+    const updatedLiability = { ...currentLiability, ...updates };
+    const result = validateData(LiabilitySchema, updatedLiability);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Liability validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
         liabilities: state.profile.liabilities.map((l) =>
-          l.id === id ? { ...l, ...updates } : l
+          l.id === id ? result.data : l
         ),
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteLiability: (id) => {
@@ -304,25 +363,47 @@ const useStore = create((set, get) => ({
 
   // Income
   addIncome: (income) => {
+    const result = validateData(IncomeSchema, income);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Income validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
-        income: [...state.profile.income, income],
+        income: [...state.profile.income, result.data],
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   updateIncome: (id, updates) => {
+    const currentIncome = get().profile.income.find(i => i.id === id);
+    if (!currentIncome) {
+      return { success: false, message: 'Income source not found' };
+    }
+
+    const updatedIncome = { ...currentIncome, ...updates };
+    const result = validateData(IncomeSchema, updatedIncome);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Income validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
         income: state.profile.income.map((i) =>
-          i.id === id ? { ...i, ...updates } : i
+          i.id === id ? result.data : i
         ),
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteIncome: (id) => {
@@ -337,25 +418,47 @@ const useStore = create((set, get) => ({
 
   // Expenses
   addExpense: (expense) => {
+    const result = validateData(ExpenseSchema, expense);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Expense validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
-        expenses: [...state.profile.expenses, expense],
+        expenses: [...state.profile.expenses, result.data],
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   updateExpense: (id, updates) => {
+    const currentExpense = get().profile.expenses.find(e => e.id === id);
+    if (!currentExpense) {
+      return { success: false, message: 'Expense not found' };
+    }
+
+    const updatedExpense = { ...currentExpense, ...updates };
+    const result = validateData(ExpenseSchema, updatedExpense);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Expense validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
         expenses: state.profile.expenses.map((e) =>
-          e.id === id ? { ...e, ...updates } : e
+          e.id === id ? result.data : e
         ),
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteExpense: (id) => {
@@ -465,25 +568,47 @@ const useStore = create((set, get) => ({
 
   // Scenarios
   addScenario: (scenario) => {
+    const result = validateData(ScenarioSchema, scenario);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Scenario validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
-        scenarios: [...state.profile.scenarios, scenario],
+        scenarios: [...state.profile.scenarios, result.data],
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   updateScenario: (id, updates) => {
+    const currentScenario = get().profile.scenarios.find(s => s.id === id);
+    if (!currentScenario) {
+      return { success: false, message: 'Scenario not found' };
+    }
+
+    const updatedScenario = { ...currentScenario, ...updates };
+    const result = validateData(ScenarioSchema, updatedScenario);
+    if (!result.success) {
+      const errorMsg = formatValidationErrors(result.errors);
+      console.error('Scenario validation failed:', errorMsg);
+      return { success: false, errors: result.errors, message: errorMsg };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
         scenarios: state.profile.scenarios.map((s) =>
-          s.id === id ? { ...s, ...updates } : s
+          s.id === id ? result.data : s
         ),
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteScenario: (id) => {
