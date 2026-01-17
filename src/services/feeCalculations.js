@@ -43,7 +43,7 @@ export function calculateAssetPlatformFee(asset, platform, settings) {
       return fee;
     }
 
-    case 'fixed':
+    case 'fixed': {
       // Fixed fee (convert to annual based on frequency)
       const exchangeRates = getExchangeRates(settings);
       const reportingCurrency = settings.reportingCurrency || 'ZAR';
@@ -72,6 +72,45 @@ export function calculateAssetPlatformFee(asset, platform, settings) {
         reportingCurrency,
         exchangeRates
       );
+    }
+
+    case 'combined': {
+      // Combined: percentage fee + fixed fee
+      const exchangeRates = getExchangeRates(settings);
+      const reportingCurrency = settings.reportingCurrency || 'ZAR';
+
+      // Percentage component
+      const percentageFee = assetValue * ((feeStructure.rate || 0) / 100);
+
+      // Fixed component
+      const feeAmount = feeStructure.amount || 0;
+      const currency = feeStructure.currency || reportingCurrency;
+      const frequency = feeStructure.frequency || 'monthly';
+
+      // Convert fixed fee to annual based on frequency
+      let annualFixedFee;
+      switch (frequency) {
+        case 'quarterly':
+          annualFixedFee = feeAmount * 4;
+          break;
+        case 'annual':
+          annualFixedFee = feeAmount;
+          break;
+        case 'monthly':
+        default:
+          annualFixedFee = feeAmount * 12;
+          break;
+      }
+
+      const fixedFeeInReportingCurrency = toReportingCurrency(
+        annualFixedFee,
+        currency,
+        reportingCurrency,
+        exchangeRates
+      );
+
+      return percentageFee + fixedFeeInReportingCurrency;
+    }
 
     default:
       return 0;
@@ -499,6 +538,29 @@ export function calculateScenarioYearFees(portfolioValue, settings) {
       }
 
       case 'fixed': {
+        const frequency = fs.frequency || 'monthly';
+        let annual = fs.amount || 0;
+
+        // Convert to annual based on frequency
+        if (frequency === 'monthly') annual *= 12;
+        else if (frequency === 'quarterly') annual *= 4;
+        // 'annual' stays as is
+
+        fixedPlatformFees += toReportingCurrency(
+          annual,
+          fs.currency || reportingCurrency,
+          reportingCurrency,
+          exchangeRates
+        );
+        break;
+      }
+
+      case 'combined': {
+        // Combined: percentage + fixed
+        // Percentage component
+        percentageBasedFees += portfolioValue * ((fs.rate || 0) / 100);
+
+        // Fixed component
         const frequency = fs.frequency || 'monthly';
         let annual = fs.amount || 0;
 

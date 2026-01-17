@@ -207,6 +207,7 @@ function FeesSettings() {
                       >
                         <option value="percentage">Percentage (% p.a.)</option>
                         <option value="fixed">Fixed Amount</option>
+                        <option value="combined">Combined (% + Fixed)</option>
                         <option value="tiered-percentage">Tiered Percentage</option>
                       </select>
                     </div>
@@ -273,6 +274,70 @@ function FeesSettings() {
                     </div>
                   )}
 
+                  {editingPlatform.feeStructure.type === 'combined' && (
+                    <>
+                      <div className="form-group">
+                        <label>Percentage Fee (% p.a.)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editingPlatform.feeStructure.rate || 0}
+                          onChange={(e) => setEditingPlatform(prev => ({
+                            ...prev,
+                            feeStructure: { ...prev.feeStructure, rate: parseFloat(e.target.value) || 0 }
+                          }))}
+                          placeholder="e.g., 0.50"
+                        />
+                        <small>Annual percentage fee on asset value</small>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Fixed Amount</label>
+                          <input
+                            type="number"
+                            step="1"
+                            value={editingPlatform.feeStructure.amount || 0}
+                            onChange={(e) => setEditingPlatform(prev => ({
+                              ...prev,
+                              feeStructure: { ...prev.feeStructure, amount: parseFloat(e.target.value) || 0 }
+                            }))}
+                            placeholder="e.g., 50"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Frequency</label>
+                          <select
+                            value={editingPlatform.feeStructure.frequency || 'monthly'}
+                            onChange={(e) => setEditingPlatform(prev => ({
+                              ...prev,
+                              feeStructure: { ...prev.feeStructure, frequency: e.target.value }
+                            }))}
+                          >
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="annual">Annual</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>Currency</label>
+                          <select
+                            value={editingPlatform.feeStructure.currency || 'ZAR'}
+                            onChange={(e) => setEditingPlatform(prev => ({
+                              ...prev,
+                              feeStructure: { ...prev.feeStructure, currency: e.target.value }
+                            }))}
+                          >
+                            <option value="ZAR">ZAR</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                          </select>
+                        </div>
+                      </div>
+                      <small>Example: 0.50% p.a. + R50/month = both percentage and fixed fees charged</small>
+                    </>
+                  )}
+
                   <div className="platform-edit-actions">
                     <button className="btn-primary" onClick={handleSavePlatformEdit}>
                       Save
@@ -294,6 +359,11 @@ function FeesSettings() {
                       {platform.feeStructure?.type === 'fixed' && (
                         <span>
                           {platform.feeStructure.currency || 'ZAR'} {platform.feeStructure.amount}/{platform.feeStructure.frequency || 'month'}
+                        </span>
+                      )}
+                      {platform.feeStructure?.type === 'combined' && (
+                        <span>
+                          {platform.feeStructure.rate}% p.a. + {platform.feeStructure.currency || 'ZAR'} {platform.feeStructure.amount}/{platform.feeStructure.frequency || 'month'}
                         </span>
                       )}
                       {platform.feeStructure?.type === 'tiered-percentage' && (
