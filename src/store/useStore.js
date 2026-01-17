@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { createDefaultProfile } from '../models/defaults';
 import { createBackup } from '../utils/backup';
 import { loadProfile, addVersionToProfile } from '../utils/migrations';
+import { debounce } from '../utils/debounce';
+import { checkStorageHealth } from '../utils/storageQuota';
 import {
   AssetSchema,
   LiabilitySchema,
@@ -11,6 +13,10 @@ import {
   validateData,
   formatValidationErrors,
 } from '../models/validation';
+
+// Create debounced save function (saves 1 second after last change)
+// This prevents excessive localStorage writes when user is actively editing
+let debouncedSaveProfile;
 
 // Multi-profile Zustand store
 const useStore = create((set, get) => ({
@@ -205,22 +211,69 @@ const useStore = create((set, get) => ({
     return true;
   },
 
-  // Save current profile to localStorage
-  saveProfile: () => {
+  // Save current profile to localStorage (IMMEDIATE - no debouncing)
+  // Use this for critical operations like deleting, switching profiles, etc.
+  saveProfileImmediate: () => {
     const { currentProfileName, profile } = get();
     if (profile) {
       profile.updatedAt = new Date().toISOString();
 
-      // Save main profile
-      localStorage.setItem(`solas_profile_${currentProfileName}`, JSON.stringify(profile));
+      try {
+        // Save main profile
+        localStorage.setItem(`solas_profile_${currentProfileName}`, JSON.stringify(profile));
 
-      // Create automatic backup
-      const backupResult = createBackup(currentProfileName, profile);
-      if (!backupResult.success) {
-        console.error('Backup failed:', backupResult.error);
-        // Don't fail the save, but log the error
-        // User will be notified via console, and we can add UI notifications later
+        // Create automatic backup
+        const backupResult = createBackup(currentProfileName, profile);
+        if (!backupResult.success) {
+          console.error('Backup failed:', backupResult.error);
+          // Don't fail the save, but log the error
+          // User will be notified via console, and we can add UI notifications later
+        }
+
+        // Check storage health periodically (every 10th save)
+        if (Math.random() < 0.1) {
+          checkStorageHealth().then(health => {
+            if (health.status === 'danger') {
+              console.error('Storage quota danger:', health.message);
+              // In future: show toast notification to user
+            } else if (health.status === 'warning') {
+              console.warn('Storage quota warning:', health.message);
+            }
+          });
+        }
+      } catch (error) {
+        // Handle QuotaExceededError
+        if (error.name === 'QuotaExceededError') {
+          console.error('localStorage quota exceeded!');
+          alert('Storage quota exceeded! Please export your data and remove old profiles.');
+        } else {
+          console.error('Failed to save profile:', error);
+        }
+        throw error; // Re-throw for caller to handle
       }
+    }
+  },
+
+  // Save current profile to localStorage (DEBOUNCED - waits 1 second)
+  // Use this for normal operations like adding/editing assets, updating settings, etc.
+  // This prevents excessive localStorage writes during active editing
+  saveProfile: () => {
+    // Initialize debounced function if not already created
+    if (!debouncedSaveProfile) {
+      debouncedSaveProfile = debounce(() => {
+        get().saveProfileImmediate();
+      }, 1000); // Wait 1 second after last change
+    }
+
+    // Call debounced save
+    debouncedSaveProfile();
+  },
+
+  // Flush any pending debounced saves immediately
+  // Use before operations that need guaranteed save (like navigation away, logout, etc.)
+  flushSave: () => {
+    if (debouncedSaveProfile) {
+      debouncedSaveProfile.flush();
     }
   },
 
@@ -593,6 +646,7 @@ const useStore = create((set, get) => ({
 
     const updatedScenario = { ...currentScenario, ...updates };
     const result = validateData(ScenarioSchema, updatedScenario);
+
     if (!result.success) {
       const errorMsg = formatValidationErrors(result.errors);
       console.error('Scenario validation failed:', errorMsg);

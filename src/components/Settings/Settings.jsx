@@ -2,6 +2,9 @@ import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
+import LoadingSpinner from '../shared/LoadingSpinner';
+import FeesSettings from './FeesSettings';
+import TaxSettings from './TaxSettings';
 import {
   ALL_CURRENCIES,
   DEFAULT_PLATFORMS,
@@ -25,6 +28,7 @@ import './Settings.css';
 function Settings() {
   const { profile, updateSettings, setAssets, addAsset, deleteProfile, profiles } = useStore();
   const { confirmDialog, showConfirm } = useConfirmDialog();
+  const [activeTab, setActiveTab] = useState('general'); // 'general' or 'fees'
 
   // Migrate legacy exchange rates if needed
   const migratedExchangeRates = profile.settings.exchangeRates && !profile.settings.exchangeRates['USD/ZAR']
@@ -35,12 +39,17 @@ function Settings() {
 
   const [settings, setSettings] = useState({
     ...profile.settings,
+    profile: {
+      ...DEFAULT_SETTINGS.profile,
+      ...profile.settings.profile,
+    },
     withdrawalRates: profile.settings.withdrawalRates || {
       conservative: 3.0,
       safe: 4.0,
       aggressive: 5.0,
     },
     targetAllocation: profile.settings.targetAllocation || DEFAULT_SETTINGS.targetAllocation,
+    expectedReturns: profile.settings.expectedReturns || DEFAULT_SETTINGS.expectedReturns,
     thresholds: profile.settings.thresholds || DEFAULT_SETTINGS.thresholds,
     platforms: profile.settings.platforms || DEFAULT_PLATFORMS,
     enabledCurrencies: profile.settings.enabledCurrencies || DEFAULT_ENABLED_CURRENCIES,
@@ -51,6 +60,8 @@ function Settings() {
   const [newPlatform, setNewPlatform] = useState('');
   const [showCurrencyWarning, setShowCurrencyWarning] = useState(false);
   const [pendingReportingCurrency, setPendingReportingCurrency] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const assetsFileInputRef = useRef(null);
   const settingsFileInputRef = useRef(null);
 
@@ -156,10 +167,31 @@ function Settings() {
 
   // Platform management handlers
   const handleAddPlatform = () => {
-    if (newPlatform.trim() && !settings.platforms.includes(newPlatform.trim())) {
+    const trimmedName = newPlatform.trim();
+    if (!trimmedName) return;
+
+    // Check if platform already exists (handle both string and object formats)
+    const platformExists = settings.platforms.some(p =>
+      typeof p === 'string' ? p === trimmedName : p.name === trimmedName
+    );
+
+    if (!platformExists) {
+      // Add as object format (new format)
+      const newPlatformObj = {
+        id: trimmedName.toLowerCase().replace(/\s+/g, '-'),
+        name: trimmedName,
+        feeStructure: {
+          type: 'percentage',
+          rate: 0.50,
+        },
+      };
       setSettings(prev => ({
         ...prev,
-        platforms: [...prev.platforms, newPlatform.trim()].sort(),
+        platforms: [...prev.platforms, newPlatformObj].sort((a, b) => {
+          const nameA = typeof a === 'string' ? a : a.name;
+          const nameB = typeof b === 'string' ? b : b.name;
+          return nameA.localeCompare(nameB);
+        }),
       }));
       setNewPlatform('');
     }
@@ -168,7 +200,14 @@ function Settings() {
   const handleRemovePlatform = (platform) => {
     setSettings(prev => ({
       ...prev,
-      platforms: prev.platforms.filter(p => p !== platform),
+      platforms: prev.platforms.filter(p => {
+        // Handle both string and object formats
+        if (typeof platform === 'string') {
+          return typeof p === 'string' ? p !== platform : p.name !== platform;
+        } else {
+          return typeof p === 'string' ? p !== platform.name : p.id !== platform.id;
+        }
+      }),
     }));
   };
 
@@ -206,6 +245,9 @@ function Settings() {
     const file = e.target.files[0];
     if (!file) return;
 
+    setIsLoading(true);
+    setLoadingMessage('Importing assets from Excel...');
+
     try {
       const assets = await importAssetsFromExcel(file);
 
@@ -223,12 +265,18 @@ function Settings() {
     } catch (error) {
       toast.error('Error importing assets: ' + error.message);
       console.error(error);
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
     }
   };
 
   const handleImportSettings = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    setIsLoading(true);
+    setLoadingMessage('Importing settings from Excel...');
 
     try {
       const importedSettings = await importSettingsFromExcel(file);
@@ -262,14 +310,44 @@ function Settings() {
     } catch (error) {
       toast.error('Error importing settings: ' + error.message);
       console.error(error);
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
     }
   };
 
   return (
-    <div className="settings">
+    <div className="settings" style={{ position: 'relative' }}>
       {confirmDialog}
+      {isLoading && <LoadingSpinner variant="overlay" message={loadingMessage} />}
 
       <h2>Settings</h2>
+
+      {/* Tab Navigation */}
+      <div className="settings-tabs">
+        <button
+          className={`tab-button ${activeTab === 'general' ? 'active' : ''}`}
+          onClick={() => setActiveTab('general')}
+        >
+          General Settings
+        </button>
+        <button
+          className={`tab-button ${activeTab === 'fees' ? 'active' : ''}`}
+          onClick={() => setActiveTab('fees')}
+        >
+          Fees & Platforms
+        </button>
+        <button
+          className={`tab-button ${activeTab === 'tax' ? 'active' : ''}`}
+          onClick={() => setActiveTab('tax')}
+        >
+          Tax Tables
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'general' ? (
+        <div className="settings-content">
 
       {/* Import/Export Section */}
       <div className="card settings-section">
@@ -365,6 +443,17 @@ function Settings() {
           </div>
 
           <div className="form-group">
+            <label>Default CGT Rate (%)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={settings.profile.defaultCGT ?? 18}
+              onChange={(e) => handleChange('profile', 'defaultCGT', parseFloat(e.target.value))}
+            />
+            <small>Capital gains tax rate (default: 18%)</small>
+          </div>
+
+          <div className="form-group">
             <label>Retirement Age</label>
             <input
               type="number"
@@ -380,6 +469,28 @@ function Settings() {
               value={settings.profile.lifeExpectancy}
               onChange={(e) => handleChange('profile', 'lifeExpectancy', parseInt(e.target.value))}
             />
+          </div>
+
+          <div className="form-group">
+            <label>Expected Inflation (% p.a.)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={settings.profile.expectedInflation ?? 4.5}
+              onChange={(e) => handleChange('profile', 'expectedInflation', parseFloat(e.target.value))}
+            />
+            <small>Used for projections (default: 4.5%)</small>
+          </div>
+
+          <div className="form-group">
+            <label>Income Growth (% p.a.)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={settings.profile.incomeGrowth ?? 5.0}
+              onChange={(e) => handleChange('profile', 'incomeGrowth', parseFloat(e.target.value))}
+            />
+            <small>Expected annual income growth (default: 5%)</small>
           </div>
 
           <div className="form-group">
@@ -664,6 +775,60 @@ function Settings() {
         </div>
       </div>
 
+      {/* Asset Class Expected Returns */}
+      <div className="card settings-section">
+        <h3>Asset Class Expected Returns</h3>
+        <p className="info-text">
+          Set the expected annual return (% p.a.) for each asset class. These are used for projections and
+          growth calculations. Individual assets can override these defaults.
+        </p>
+
+        <div className="form-grid">
+          {ASSET_CLASSES.map(assetClass => (
+            <div key={assetClass} className="form-group">
+              <label>{assetClass} (% p.a.)</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="50"
+                value={settings.expectedReturns?.[assetClass] ?? DEFAULT_SETTINGS.expectedReturns[assetClass] ?? 0}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  expectedReturns: {
+                    ...prev.expectedReturns,
+                    [assetClass]: parseFloat(e.target.value) || 0
+                  }
+                }))}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: '1rem' }}>
+          <button
+            className="btn-secondary"
+            onClick={async () => {
+              const confirmed = await showConfirm({
+                title: 'Reset Expected Returns',
+                message: 'Reset expected returns to default values? This will replace your custom return assumptions.',
+                confirmText: 'Reset',
+                variant: 'warning',
+              });
+
+              if (confirmed) {
+                setSettings(prev => ({
+                  ...prev,
+                  expectedReturns: { ...DEFAULT_SETTINGS.expectedReturns }
+                }));
+              }
+            }}
+          >
+            Reset to Defaults
+          </button>
+        </div>
+      </div>
+
       {/* Rebalancing Thresholds */}
       <div className="card settings-section">
         <h3>Rebalancing & Concentration Thresholds</h3>
@@ -833,18 +998,23 @@ function Settings() {
         </div>
 
         <div className="platform-list">
-          {(settings.platforms || []).map((platform, index) => (
-            <div key={index} className="platform-item">
-              <span>{platform}</span>
-              <button
-                className="btn-small btn-danger"
-                onClick={() => handleRemovePlatform(platform)}
-                title="Remove platform"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {(settings.platforms || []).map((platform, index) => {
+            // Handle both old format (string) and new format (object with id, name)
+            const platformName = typeof platform === 'string' ? platform : platform.name;
+            const platformKey = typeof platform === 'string' ? platform : platform.id;
+            return (
+              <div key={platformKey || index} className="platform-item">
+                <span>{platformName}</span>
+                <button
+                  className="btn-small btn-danger"
+                  onClick={() => handleRemovePlatform(platform)}
+                  title="Remove platform"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {(settings.platforms || []).length === 0 && (
@@ -858,6 +1028,14 @@ function Settings() {
           Save Settings
         </button>
       </div>
+      </div>
+      ) : activeTab === 'fees' ? (
+        /* Fees & Platforms Tab */
+        <FeesSettings />
+      ) : (
+        /* Tax Tables Tab */
+        <TaxSettings />
+      )}
     </div>
   );
 }

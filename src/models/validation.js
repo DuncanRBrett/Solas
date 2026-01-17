@@ -127,6 +127,15 @@ export const AssetSchema = z.object({
   // Fees
   ter: PercentageSchema.optional().default(0),
 
+  // Advisor fee exclusion
+  excludeFromAdvisorFee: z.boolean().optional().default(false),
+
+  // Performance fee notes (informational only - complex structures that can't be calculated)
+  performanceFeeNotes: z.string()
+    .max(500, 'Performance fee notes too long (max 500 characters)')
+    .optional()
+    .default(''),
+
   // Metadata
   priceUrl: URLSchema,
   factSheetUrl: URLSchema,
@@ -347,10 +356,20 @@ const MarketCrashSchema = z.object({
     .min(18, 'Age must be at least 18')
     .max(120, 'Age unreasonably high'),
 
+  // Legacy single drop percentage (kept for backward compatibility)
   dropPercentage: z.number()
     .min(0, 'Drop percentage cannot be negative')
     .max(100, 'Drop percentage cannot exceed 100')
-    .finite('Must be a valid number'),
+    .finite('Must be a valid number')
+    .optional(),
+
+  // New: per-asset-class drop percentages
+  assetClassDrops: z.record(z.string(), z.number().min(0).max(100))
+    .optional()
+    .default({}),
+
+  // Legacy: affected asset classes (kept for backward compatibility)
+  affectedAssetClasses: z.array(z.string()).optional(),
 
   description: z.string()
     .max(200, 'Description too long (max 200 characters)')
@@ -373,6 +392,40 @@ const UnexpectedExpenseSchema = z.object({
     .default('Unexpected expense'),
 });
 
+const ExpensePhaseSchema = z.object({
+  name: z.string()
+    .max(50, 'Phase name too long')
+    .optional(),
+
+  ageStart: z.number()
+    .int('Age must be a whole number')
+    .min(40, 'Age must be at least 40')
+    .max(120, 'Age unreasonably high'),
+
+  ageEnd: z.number()
+    .int('Age must be a whole number')
+    .min(40, 'Age must be at least 40')
+    .max(120, 'Age unreasonably high'),
+
+  percentage: z.number()
+    .min(0, 'Percentage cannot be negative')
+    .max(200, 'Percentage cannot exceed 200')
+    .finite('Must be a valid number'),
+});
+
+// Support both legacy 3-phase and new 4-phase expense structures
+const ExpensePhasesSchema = z.object({
+  // Legacy 3-phase structure
+  phase1: ExpensePhaseSchema.optional(),
+  phase2: ExpensePhaseSchema.optional(),
+  phase3: ExpensePhaseSchema.optional(),
+  // New 4-phase structure
+  working: ExpensePhaseSchema.optional(),
+  activeRetirement: ExpensePhaseSchema.optional(),
+  slowerPace: ExpensePhaseSchema.optional(),
+  laterYears: ExpensePhaseSchema.optional(),
+}).passthrough(); // Allow additional fields for backward compatibility
+
 export const ScenarioSchema = z.object({
   id: z.string().uuid('Must be a valid UUID'),
 
@@ -386,10 +439,13 @@ export const ScenarioSchema = z.object({
     .default(''),
 
   // Assumptions
+  // Legacy: single market return (kept for backward compatibility)
   marketReturn: z.number()
     .min(-50, 'Market return too low (<-50%)')
     .max(50, 'Market return unreasonably high (>50%)')
-    .finite('Must be a valid number'),
+    .finite('Must be a valid number')
+    .optional()
+    .default(9),
 
   inflationRate: z.number()
     .min(-10, 'Inflation rate too low')
@@ -418,6 +474,18 @@ export const ScenarioSchema = z.object({
     'Annual expenses is unreasonably large'
   ),
 
+  // Asset class returns - new weighted return approach
+  useCustomReturns: z.boolean().optional().default(false),
+  expectedReturns: z.record(z.string(), z.number().min(-50).max(100))
+    .optional()
+    .default({}),
+
+  // Currency movement modeling
+  useCurrencyMovement: z.boolean().optional().default(false),
+  currencyMovement: z.record(z.string(), z.number().min(-50).max(50))
+    .optional()
+    .default({}),
+
   // Shocks
   marketCrashes: z.array(MarketCrashSchema)
     .max(20, 'Too many market crashes (max 20)')
@@ -426,6 +494,10 @@ export const ScenarioSchema = z.object({
   unexpectedExpenses: z.array(UnexpectedExpenseSchema)
     .max(50, 'Too many unexpected expenses (max 50)')
     .default([]),
+
+  // Custom expense phases for this scenario
+  useCustomExpensePhases: z.boolean().optional().default(false),
+  expensePhases: ExpensePhasesSchema.optional().nullable().default(null),
 
   // Results
   results: z.any().nullable().optional().default(null),

@@ -1,0 +1,154 @@
+.currency-breakdown-card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.currency-breakdown-card.empty {
+  text-align: center;
+}
+
+.currency-breakdown-card h3 {
+  margin: 0 0 20px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.empty-message {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 20px 0;
+}
+
+.currency-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.total-label {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.total-value {
+  color: white;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.currency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.currency-item {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  transition: all 0.2s ease;
+}
+
+.currency-item:hover {
+  border-color: #cbd5e1;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.currency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.currency-code {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+.currency-percentage {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6366f1;
+  background: #eef2ff;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.currency-values {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.native-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.converted-value {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.currency-meta {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.currency-bar {
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.currency-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.currency-note {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.currency-note small {
+  color: #9ca3af;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .currency-breakdown-card {
+    padding: 16px;
+  }
+
+  .total-value {
+    font-size: 20px;
+  }
+
+  .native-value {
+    font-size: 16px;
+  }
+}

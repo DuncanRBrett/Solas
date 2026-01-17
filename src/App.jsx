@@ -9,19 +9,47 @@ import Liabilities from './components/Liabilities/Liabilities';
 import RetirementPrep from './components/RetirementPrep/RetirementPrep';
 import Scenarios from './components/Scenarios/Scenarios';
 import Rebalancing from './components/Rebalancing/Rebalancing';
+import Fees from './components/Fees/Fees';
 import Settings from './components/Settings/Settings';
+import KeyboardShortcutsHelp from './components/shared/KeyboardShortcutsHelp';
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import './App.css';
+
+// Load test data generator in development
+if (process.env.NODE_ENV === 'development') {
+  import('./utils/testDataGenerator');
+}
 
 function App() {
   const { init, profile, profiles, currentProfileName, switchProfile, createProfile, deleteProfile } = useStore();
   const [currentView, setCurrentView] = useState('dashboard');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  const { registerShortcut, unregisterShortcut } = useKeyboardShortcuts();
 
   // Initialize on mount
   useEffect(() => {
     init();
+
+    // Expose store to window in development for testing/debugging
+    if (process.env.NODE_ENV === 'development') {
+      window.__SOLAS_STORE__ = useStore;
+      console.log('🔧 Dev mode: Store exposed as window.__SOLAS_STORE__');
+    }
   }, [init]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    // ? to show keyboard shortcuts
+    registerShortcut('?', () => setShowKeyboardHelp(true));
+    registerShortcut('shift+/', () => setShowKeyboardHelp(true)); // Alternative for ?
+
+    return () => {
+      unregisterShortcut('?');
+      unregisterShortcut('shift+/');
+    };
+  }, [registerShortcut, unregisterShortcut]);
 
   if (!profile) {
     return <div className="loading">Loading...</div>;
@@ -60,6 +88,8 @@ function App() {
         return <Scenarios />;
       case 'rebalancing':
         return <Rebalancing />;
+      case 'fees':
+        return <Fees />;
       case 'settings':
         return <Settings />;
       default:
@@ -206,6 +236,12 @@ function App() {
           Rebalancing
         </button>
         <button
+          className={currentView === 'fees' ? 'active' : ''}
+          onClick={() => setCurrentView('fees')}
+        >
+          Fees
+        </button>
+        <button
           className={currentView === 'settings' ? 'active' : ''}
           onClick={() => setCurrentView('settings')}
         >
@@ -221,9 +257,15 @@ function App() {
       {/* Footer */}
       <footer className="app-footer">
         <span>Solas v3 - Personal Retirement Planning Tool</span>
-        <span>Profile: {currentProfileName} | Last updated: {new Date(profile.updatedAt).toLocaleString()}</span>
+        <span>
+          Profile: {currentProfileName} | Last updated: {new Date(profile.updatedAt).toLocaleString()}
+          {' '} | Press <kbd style={{ padding: '0.125rem 0.375rem', background: '#f3f4f6', borderRadius: '0.25rem', fontSize: '0.75rem' }}>?</kbd> for shortcuts
+        </span>
       </footer>
     </div>
+
+    {/* Keyboard Shortcuts Help Modal */}
+    {showKeyboardHelp && <KeyboardShortcutsHelp onClose={() => setShowKeyboardHelp(false)} />}
     </>
   );
 }

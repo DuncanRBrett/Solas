@@ -611,6 +611,109 @@
   padding-top: 0.75rem;
 }
 
+/* Expense Phases Configuration */
+.expense-phases-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: var(--color-bg);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+}
+
+.expense-phases-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  cursor: pointer;
+}
+
+.expense-phases-toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.expense-phases-toggle span {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.expense-phases-description {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-bottom: 1rem;
+}
+
+.expense-phases-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.phase-card {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.phase-card h5 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.phase-card .phase-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.phase-card .phase-row:last-child {
+  margin-bottom: 0;
+}
+
+.phase-card .form-group {
+  margin-bottom: 0;
+}
+
+.phase-card .form-group label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.phase-card .form-group input {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+}
+
+.phase-card .form-group input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.phase-card .form-group input:disabled {
+  background-color: var(--color-bg);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+@media (max-width: 1024px) {
+  .expense-phases-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
   .scenarios-grid {
     grid-template-columns: 1fr;
@@ -627,4 +730,208 @@
   .event-row {
     flex-wrap: wrap;
   }
+}
+
+/* Checkbox Group */
+.form-group.checkbox-group {
+  margin-bottom: 0.75rem;
+}
+
+.form-group.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.form-group.checkbox-group input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.form-group.checkbox-group small {
+  display: block;
+  margin-top: 0.25rem;
+  margin-left: 1.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* Asset Class Returns Grid */
+.returns-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.returns-grid .form-group.compact {
+  margin-bottom: 0;
+}
+
+.returns-grid .form-group.compact label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+/* Currency Movement Grid */
+.currency-movement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.currency-movement-grid .form-group.compact {
+  margin-bottom: 0;
+}
+
+.currency-movement-grid .form-group.compact label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+/* Input with suffix */
+.input-with-suffix {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.input-with-suffix input {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+}
+
+.input-with-suffix span {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* Crash Event with Affected Asset Classes */
+.crash-event {
+  padding: 0.75rem;
+  background-color: var(--color-bg);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.crash-event .event-row {
+  padding: 0;
+  background-color: transparent;
+  margin-bottom: 0.75rem;
+}
+
+/* Crash Drops - per asset class */
+.crash-drops {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.crash-drops > label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 0.25rem;
+}
+
+.crash-drops > small {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.crash-drops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.crash-drop-item {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  background-color: var(--color-card);
+  transition: all 0.15s ease;
+}
+
+.crash-drop-item.active {
+  border-color: var(--color-danger);
+  background-color: #fef2f2;
+}
+
+.crash-drop-item label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.crash-drop-item.active label {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.crash-drop-item .input-with-suffix input {
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.8rem;
+}
+
+.crash-drop-item .input-with-suffix input::placeholder {
+  color: #d1d5db;
+}
+
+/* 4-Phase Expense Grid */
+.expense-phases-grid.four-phase {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 1200px) {
+  .expense-phases-grid.four-phase {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .expense-phases-grid.four-phase {
+    grid-template-columns: 1fr;
+  }
+
+  .returns-grid,
+  .currency-movement-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Phase Inputs layout */
+.phase-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.phase-inputs .form-group {
+  margin-bottom: 0;
+}
+
+.phase-inputs .form-group label {
+  font-size: 0.7rem;
+  margin-bottom: 0.25rem;
+}
+
+.phase-inputs .form-group input {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
 }

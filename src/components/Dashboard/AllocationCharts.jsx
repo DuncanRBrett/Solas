@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, memo } from 'react';
 import { Pie } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -74,7 +74,8 @@ function AllocationCharts() {
     };
   }, [assets, equityAssets, legacyExchangeRates, viewBy]);
 
-  const chartOptions = {
+  // Memoize chart options to prevent unnecessary re-renders
+  const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
@@ -116,7 +117,7 @@ function AllocationCharts() {
         },
       },
     },
-  };
+  }), [reportingCurrency]); // Only recreate if reporting currency changes
 
   // Get title for chart based on viewBy
   const getChartTitle = () => {
@@ -152,4 +153,6 @@ function AllocationCharts() {
   );
 }
 
-export default AllocationCharts;
+// Wrap in React.memo to prevent unnecessary re-renders
+// Only re-renders when profile changes
+export default memo(AllocationCharts);

@@ -148,6 +148,47 @@
   color: #d97706;
 }
 
+.assets-summary .summary-card.projected {
+  border-left: 4px solid #3b82f6;
+}
+
+.assets-summary .summary-card.projected .highlight {
+  color: #2563eb;
+}
+
+.assets-summary .summary-card .highlight.positive {
+  color: #059669;
+}
+
+/* Projection table */
+.projection-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.projection-table th,
+.projection-table td {
+  padding: 0.75rem;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.projection-table th {
+  background: var(--color-background);
+  font-weight: 600;
+  text-align: right;
+}
+
+.projection-table th:first-child,
+.projection-table td:first-child {
+  text-align: left;
+  width: 80px;
+}
+
+.projection-table tbody tr:hover {
+  background-color: var(--color-background);
+}
+
 /* Actions cell */
 .actions-cell {
   white-space: nowrap;

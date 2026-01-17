@@ -13,11 +13,15 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import useStore from '../../store/useStore';
+import EmptyState from '../shared/EmptyState';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
-import { createDefaultScenario } from '../../models/defaults';
+import { createDefaultScenario, ASSET_CLASSES } from '../../models/defaults';
 import { runScenario } from '../../services/scenarioCalculations';
 import { formatCurrency, formatPercentage, toZAR, formatInReportingCurrency, toLegacyExchangeRates } from '../../utils/calculations';
 import './Scenarios.css';
+
+// Available currencies for movement modeling
+const MOVEMENT_CURRENCIES = ['USD', 'EUR', 'GBP'];
 
 // Register Chart.js components
 ChartJS.register(
@@ -74,12 +78,38 @@ function Scenarios() {
   }, [expenseCategories, expenses, exchangeRates]);
 
   const handleAdd = () => {
+    const lifePhases = settings.lifePhases || {};
     const newScenario = {
       ...createDefaultScenario(),
       retirementAge: settings.profile.retirementAge,
       lifeExpectancy: settings.profile.lifeExpectancy,
       monthlySavings: settings.profile.monthlySavings,
-      inflationRate: settings.inflation || 4.5,
+      inflationRate: settings.profile.expectedInflation || settings.inflation || 4.5,
+      // Copy expected returns from settings
+      expectedReturns: { ...(settings.expectedReturns || createDefaultScenario().expectedReturns) },
+      // Set up expense phases from life phases
+      expensePhases: {
+        working: {
+          ageStart: settings.profile.age || 55,
+          ageEnd: (settings.profile.retirementAge || 65) - 1,
+          percentage: lifePhases.working?.percentage || 100
+        },
+        activeRetirement: {
+          ageStart: settings.profile.retirementAge || 65,
+          ageEnd: lifePhases.activeRetirement?.ageEnd || 72,
+          percentage: lifePhases.activeRetirement?.percentage || 100
+        },
+        slowerPace: {
+          ageStart: lifePhases.slowerPace?.ageStart || 73,
+          ageEnd: lifePhases.slowerPace?.ageEnd || 80,
+          percentage: lifePhases.slowerPace?.percentage || 80
+        },
+        laterYears: {
+          ageStart: lifePhases.laterYears?.ageStart || 81,
+          ageEnd: settings.profile.lifeExpectancy || 90,
+          percentage: lifePhases.laterYears?.percentage || 60
+        },
+      },
     };
     setFormData(newScenario);
     setIsAdding(true);
@@ -157,7 +187,15 @@ function Scenarios() {
       ...prev,
       marketCrashes: [
         ...prev.marketCrashes,
-        { age: settings.profile.retirementAge, dropPercentage: 30, description: 'Market crash' },
+        {
+          age: settings.profile.retirementAge,
+          description: 'Market crash',
+          // Per-asset-class drop percentages (new format)
+          assetClassDrops: {
+            'Offshore Equity': 30,
+            'SA Equity': 30,
+          },
+        },
       ],
     }));
   };
@@ -172,9 +210,42 @@ function Scenarios() {
   const handleCrashChange = (index, field, value) => {
     setFormData((prev) => ({
       ...prev,
-      marketCrashes: prev.marketCrashes.map((crash, i) =>
-        i === index ? { ...crash, [field]: field === 'description' ? value : parseFloat(value) || 0 } : crash
-      ),
+      marketCrashes: prev.marketCrashes.map((crash, i) => {
+        if (i !== index) return crash;
+        if (field === 'description') {
+          return { ...crash, [field]: value };
+        } else if (field === 'age') {
+          return { ...crash, [field]: parseInt(value) || 0 };
+        } else {
+          return { ...crash, [field]: value };
+        }
+      }),
+    }));
+  };
+
+  // Update drop percentage for a specific asset class in a crash
+  const handleCrashAssetClassDrop = (index, assetClass, dropValue) => {
+    setFormData((prev) => ({
+      ...prev,
+      marketCrashes: prev.marketCrashes.map((crash, i) => {
+        if (i !== index) return crash;
+        const currentDrops = crash.assetClassDrops || {};
+        const dropPercentage = parseFloat(dropValue);
+
+        // If drop is 0 or empty, remove the asset class
+        if (!dropPercentage || dropPercentage <= 0) {
+          const { [assetClass]: removed, ...remaining } = currentDrops;
+          return { ...crash, assetClassDrops: remaining };
+        }
+
+        return {
+          ...crash,
+          assetClassDrops: {
+            ...currentDrops,
+            [assetClass]: dropPercentage,
+          },
+        };
+      }),
     }));
   };
 
@@ -283,16 +354,6 @@ function Scenarios() {
             <h4>Assumptions</h4>
             <div className="form-grid">
               <div className="form-group">
-                <label>Market Return (% p.a.)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={formData.marketReturn}
-                  onChange={(e) => handleChange('marketReturn', parseFloat(e.target.value) || 0)}
-                />
-                <small>Nominal return (before inflation)</small>
-              </div>
-              <div className="form-group">
                 <label>Inflation Rate (% p.a.)</label>
                 <input
                   type="number"
@@ -350,6 +411,82 @@ function Scenarios() {
             </div>
           </div>
 
+          {/* Asset Class Returns */}
+          <div className="form-section">
+            <h4>Asset Class Returns</h4>
+            <div className="form-group checkbox-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.useCustomReturns || false}
+                  onChange={(e) => handleChange('useCustomReturns', e.target.checked)}
+                />
+                Override returns for this scenario
+              </label>
+              <small>If unchecked, uses returns from Settings. Weighted return is calculated based on your portfolio allocation.</small>
+            </div>
+
+            {formData.useCustomReturns && (
+              <div className="returns-grid">
+                {ASSET_CLASSES.map((assetClass) => (
+                  <div key={assetClass} className="form-group compact">
+                    <label>{assetClass}</label>
+                    <div className="input-with-suffix">
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={formData.expectedReturns?.[assetClass] ?? settings.expectedReturns?.[assetClass] ?? 8}
+                        onChange={(e) => {
+                          const newReturns = { ...formData.expectedReturns, [assetClass]: parseFloat(e.target.value) || 0 };
+                          handleChange('expectedReturns', newReturns);
+                        }}
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Currency Movement */}
+          <div className="form-section">
+            <h4>Currency Movement</h4>
+            <div className="form-group checkbox-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.useCurrencyMovement || false}
+                  onChange={(e) => handleChange('useCurrencyMovement', e.target.checked)}
+                />
+                Model currency appreciation/depreciation
+              </label>
+              <small>Positive = foreign currency strengthens vs {reportingCurrency}. This adjusts returns on non-{reportingCurrency} assets.</small>
+            </div>
+
+            {formData.useCurrencyMovement && (
+              <div className="currency-movement-grid">
+                {MOVEMENT_CURRENCIES.filter(c => c !== reportingCurrency).map((currency) => (
+                  <div key={currency} className="form-group compact">
+                    <label>{currency} vs {reportingCurrency}</label>
+                    <div className="input-with-suffix">
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={formData.currencyMovement?.[currency] ?? 0}
+                        onChange={(e) => {
+                          const newMovement = { ...formData.currencyMovement, [currency]: parseFloat(e.target.value) || 0 };
+                          handleChange('currencyMovement', newMovement);
+                        }}
+                      />
+                      <span>% p.a.</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="form-section">
             <h4>
               Market Crashes
@@ -360,34 +497,55 @@ function Scenarios() {
             ) : (
               <div className="events-list">
                 {formData.marketCrashes.map((crash, index) => (
-                  <div key={index} className="event-row">
-                    <div className="form-group">
-                      <label>At Age</label>
-                      <input
-                        type="number"
-                        value={crash.age}
-                        onChange={(e) => handleCrashChange(index, 'age', e.target.value)}
-                      />
+                  <div key={index} className="crash-event">
+                    <div className="event-row">
+                      <div className="form-group">
+                        <label>At Age</label>
+                        <input
+                          type="number"
+                          value={crash.age}
+                          onChange={(e) => handleCrashChange(index, 'age', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group flex-grow">
+                        <label>Description</label>
+                        <input
+                          type="text"
+                          value={crash.description}
+                          onChange={(e) => handleCrashChange(index, 'description', e.target.value)}
+                        />
+                      </div>
+                      <button className="btn-small btn-danger" onClick={() => handleRemoveCrash(index)}>
+                        Remove
+                      </button>
                     </div>
-                    <div className="form-group">
-                      <label>Drop %</label>
-                      <input
-                        type="number"
-                        value={crash.dropPercentage}
-                        onChange={(e) => handleCrashChange(index, 'dropPercentage', e.target.value)}
-                      />
+                    <div className="crash-drops">
+                      <label>Drop % by Asset Class:</label>
+                      <small>Set drop percentage for each asset class. Leave at 0 or empty for unaffected classes.</small>
+                      <div className="crash-drops-grid">
+                        {ASSET_CLASSES.map((assetClass) => {
+                          const dropValue = crash.assetClassDrops?.[assetClass] || '';
+                          const hasValue = dropValue !== '' && dropValue > 0;
+                          return (
+                            <div key={assetClass} className={`crash-drop-item ${hasValue ? 'active' : ''}`}>
+                              <label>{assetClass}</label>
+                              <div className="input-with-suffix">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="5"
+                                  value={dropValue}
+                                  placeholder="0"
+                                  onChange={(e) => handleCrashAssetClassDrop(index, assetClass, e.target.value)}
+                                />
+                                <span>%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="form-group flex-grow">
-                      <label>Description</label>
-                      <input
-                        type="text"
-                        value={crash.description}
-                        onChange={(e) => handleCrashChange(index, 'description', e.target.value)}
-                      />
-                    </div>
-                    <button className="btn-small btn-danger" onClick={() => handleRemoveCrash(index)}>
-                      Remove
-                    </button>
                   </div>
                 ))}
               </div>
@@ -435,6 +593,269 @@ function Scenarios() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Expense Phases Section - 4 Life Phases */}
+          <div className="form-section">
+            <h4>Life Phase Expense Multipliers</h4>
+            <p className="info-text">
+              Model how expenses change across different life phases.
+              Percentages are applied to your base annual expenses.
+            </p>
+
+            <div className="form-group checkbox-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.useCustomExpensePhases || false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (checked && !formData.expensePhases?.working) {
+                      // Initialize with 4-phase structure
+                      const lifePhases = settings.lifePhases || {};
+                      setFormData(prev => ({
+                        ...prev,
+                        useCustomExpensePhases: checked,
+                        expensePhases: {
+                          working: {
+                            ageStart: settings.profile.age || 55,
+                            ageEnd: (settings.profile.retirementAge || 65) - 1,
+                            percentage: lifePhases.working?.percentage || 100
+                          },
+                          activeRetirement: {
+                            ageStart: settings.profile.retirementAge || 65,
+                            ageEnd: lifePhases.activeRetirement?.ageEnd || 72,
+                            percentage: lifePhases.activeRetirement?.percentage || 100
+                          },
+                          slowerPace: {
+                            ageStart: lifePhases.slowerPace?.ageStart || 73,
+                            ageEnd: lifePhases.slowerPace?.ageEnd || 80,
+                            percentage: lifePhases.slowerPace?.percentage || 80
+                          },
+                          laterYears: {
+                            ageStart: lifePhases.laterYears?.ageStart || 81,
+                            ageEnd: settings.profile.lifeExpectancy || 90,
+                            percentage: lifePhases.laterYears?.percentage || 60
+                          }
+                        }
+                      }));
+                    } else {
+                      handleChange('useCustomExpensePhases', checked);
+                    }
+                  }}
+                />
+                Override expense phases for this scenario
+              </label>
+              <small>If unchecked, uses life phases from Settings</small>
+            </div>
+
+            {formData.useCustomExpensePhases && (
+              <div className="expense-phases-grid four-phase">
+                {/* Working Phase */}
+                <div className="phase-card">
+                  <h5>Working</h5>
+                  <div className="phase-inputs">
+                    <div className="form-group">
+                      <label>From Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.working?.ageStart || settings.profile.age || 55}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            working: { ...prev.expensePhases?.working, ageStart: parseInt(e.target.value) || 55 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>To Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.working?.ageEnd || (settings.profile.retirementAge || 65) - 1}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            working: { ...prev.expensePhases?.working, ageEnd: parseInt(e.target.value) || 64 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Expenses %</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="150"
+                        value={formData.expensePhases?.working?.percentage || 100}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            working: { ...prev.expensePhases?.working, percentage: parseInt(e.target.value) || 100 }
+                          }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Active Retirement Phase */}
+                <div className="phase-card">
+                  <h5>Active Retirement</h5>
+                  <div className="phase-inputs">
+                    <div className="form-group">
+                      <label>From Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.activeRetirement?.ageStart || settings.profile.retirementAge || 65}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            activeRetirement: { ...prev.expensePhases?.activeRetirement, ageStart: parseInt(e.target.value) || 65 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>To Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.activeRetirement?.ageEnd || 72}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            activeRetirement: { ...prev.expensePhases?.activeRetirement, ageEnd: parseInt(e.target.value) || 72 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Expenses %</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="150"
+                        value={formData.expensePhases?.activeRetirement?.percentage || 100}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            activeRetirement: { ...prev.expensePhases?.activeRetirement, percentage: parseInt(e.target.value) || 100 }
+                          }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Slower Pace Phase */}
+                <div className="phase-card">
+                  <h5>Slower Pace</h5>
+                  <div className="phase-inputs">
+                    <div className="form-group">
+                      <label>From Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.slowerPace?.ageStart || 73}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            slowerPace: { ...prev.expensePhases?.slowerPace, ageStart: parseInt(e.target.value) || 73 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>To Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.slowerPace?.ageEnd || 80}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            slowerPace: { ...prev.expensePhases?.slowerPace, ageEnd: parseInt(e.target.value) || 80 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Expenses %</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="150"
+                        value={formData.expensePhases?.slowerPace?.percentage || 80}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            slowerPace: { ...prev.expensePhases?.slowerPace, percentage: parseInt(e.target.value) || 80 }
+                          }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Later Years Phase */}
+                <div className="phase-card">
+                  <h5>Later Years</h5>
+                  <div className="phase-inputs">
+                    <div className="form-group">
+                      <label>From Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.laterYears?.ageStart || 81}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            laterYears: { ...prev.expensePhases?.laterYears, ageStart: parseInt(e.target.value) || 81 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>To Age</label>
+                      <input
+                        type="number"
+                        value={formData.expensePhases?.laterYears?.ageEnd || settings.profile.lifeExpectancy || 90}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            laterYears: { ...prev.expensePhases?.laterYears, ageEnd: parseInt(e.target.value) || 90 }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Expenses %</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="150"
+                        value={formData.expensePhases?.laterYears?.percentage || 60}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          expensePhases: {
+                            ...prev.expensePhases,
+                            laterYears: { ...prev.expensePhases?.laterYears, percentage: parseInt(e.target.value) || 60 }
+                          }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -572,6 +993,22 @@ function Scenarios() {
                     <td key={s.id}>{s.unexpectedExpenses.length}</td>
                   ))}
                 </tr>
+                <tr>
+                  <td>Total Fees Paid</td>
+                  {comparisonScenarios.map((s) => (
+                    <td key={s.id} className="negative">
+                      {fmt(s.results.totalFeesPaid || 0)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td>Avg Annual Fees</td>
+                  {comparisonScenarios.map((s) => (
+                    <td key={s.id}>
+                      {fmt(s.results.metrics?.averageAnnualFees || 0)}
+                    </td>
+                  ))}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -580,7 +1017,16 @@ function Scenarios() {
 
       {/* Scenario List */}
       <div className="scenarios-grid">
-        {scenarios.map((scenario) => {
+        {scenarios.length === 0 ? (
+          <EmptyState
+            icon="🎯"
+            title="No scenarios yet"
+            message="Create retirement scenarios to model different market conditions, savings rates, and expense levels. Test how your portfolio performs over time."
+            actionLabel="Create Scenario"
+            onAction={handleAddScenario}
+          />
+        ) : (
+          scenarios.map((scenario) => {
           const isSelected = selectedScenario?.id === scenario.id;
           const isSelectedForComparison = selectedForComparison.includes(scenario.id);
 
@@ -654,7 +1100,8 @@ function Scenarios() {
               </div>
             </div>
           );
-        })}
+        })
+        )}
       </div>
 
       {/* Selected Scenario Results */}
@@ -695,6 +1142,20 @@ function Scenarios() {
               <h5>Total Expenses</h5>
               <p>{fmt(selectedScenario.results.totalExpenses)}</p>
             </div>
+            {selectedScenario.results.totalFeesPaid > 0 && (
+              <div className="result-card">
+                <h5>Total Fees Paid</h5>
+                <p className="negative">{fmt(selectedScenario.results.totalFeesPaid)}</p>
+                <small>Avg: {fmt(selectedScenario.results.metrics?.averageAnnualFees || 0)}/yr</small>
+              </div>
+            )}
+            {selectedScenario.results.totalWithdrawalTax > 0 && (
+              <div className="result-card">
+                <h5>Total Withdrawal Tax</h5>
+                <p className="negative">{fmt(selectedScenario.results.totalWithdrawalTax)}</p>
+                <small>CGT + income tax on drawdowns</small>
+              </div>
+            )}
           </div>
 
           {/* Expense Coverage Breakdown */}
@@ -779,8 +1240,12 @@ function Scenarios() {
                 <span className="metric-value">{formatPercentage(selectedScenario.results.metrics.inflationRate)}</span>
               </div>
               <div className="metric">
-                <span className="metric-label">Withdrawal Tax Rate:</span>
-                <span className="metric-value">{formatPercentage(selectedScenario.results.metrics.withdrawalTaxRate)}</span>
+                <span className="metric-label">CGT Rate (on gains):</span>
+                <span className="metric-value">{formatPercentage(selectedScenario.results.metrics.cgtRate)}</span>
+              </div>
+              <div className="metric">
+                <span className="metric-label">Portfolio Gain Ratio:</span>
+                <span className="metric-value">{formatPercentage(selectedScenario.results.metrics.gainRatio)} (est.)</span>
               </div>
               <div className="metric">
                 <span className="metric-label">Equity Allocation:</span>
@@ -867,16 +1332,17 @@ function Scenarios() {
               <h5>Understanding the Columns</h5>
               <ul>
                 <li><strong>Expenses:</strong> Your inflation-adjusted annual expenses for that year</li>
-                <li><strong>Income:</strong> Total income from pensions, dividends, and interest</li>
-                <li><strong>By Income:</strong> Portion of expenses covered by your income sources</li>
-                <li><strong>By Returns:</strong> Portion covered by investment growth (if returns exceed withdrawal needs)</li>
-                <li><strong>Capital Drawdown:</strong> Amount you're actually depleting from your portfolio principal</li>
-                <li><strong>Drawdown Rate:</strong> Your gross withdrawal as a percentage of your portfolio at the start of the year</li>
+                <li><strong>Income:</strong> Total income from pensions, dividends, and interest (after income tax)</li>
+                <li><strong>Net Needed:</strong> Expenses minus income - what you need from your portfolio</li>
+                <li><strong>Total Tax:</strong> Income tax + CGT on withdrawal (TFSA: 0%, Taxable: CGT on gains, RA: income tax)</li>
+                <li><strong>Gross Withdrawal:</strong> Net Needed + CGT = actual amount leaving your portfolio</li>
+                <li><strong>Drawdown Rate:</strong> Gross withdrawal as % of portfolio at start of year</li>
               </ul>
               <div className="formula-box">
-                <strong>Drawdown Rate Formula:</strong>
-                <code>Drawdown Rate = (Gross Withdrawal / Portfolio Value at Start of Year) × 100</code>
-                <p>Where Gross Withdrawal = (Expenses - Income) / (1 - Withdrawal Tax Rate)</p>
+                <strong>The Withdrawal Formula:</strong>
+                <p>Income + Gross Withdrawal = Expenses + Tax paid to SARS</p>
+                <p>Tax is estimated based on your account mix (TFSA: 0%, Taxable: CGT on gains, RA: income tax)</p>
+                <p><em>Note: CGT only applies to the gain portion ({selectedScenario.results.metrics?.gainRatio?.toFixed(0) || '0'}%) of taxable account withdrawals.</em></p>
               </div>
               <p className="rate-guide">
                 <span className="rate-ok">≤4%</span> Sustainable (Trinity Study)
@@ -891,50 +1357,41 @@ function Scenarios() {
                   <tr>
                     <th>Age</th>
                     <th>Portfolio</th>
-                    <th>Status</th>
                     <th>Expenses</th>
-                    <th>Income</th>
-                    <th>By Income</th>
-                    <th>By Returns</th>
-                    <th>Capital Drawdown</th>
-                    <th>Drawdown Rate</th>
+                    <th>Income (Net)</th>
+                    <th>Net Needed</th>
+                    <th>Withdrawal Tax</th>
+                    <th>Gross Withdrawal</th>
+                    <th>Drawdown %</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedScenario.results.trajectory
-                    .filter(point => point.isRetired) // Only show retirement years
-                    .map((point) => (
-                      <tr key={point.age} className={point.netWorth <= 0 ? 'depleted' : ''}>
-                        <td>{point.age}</td>
-                        <td className={point.netWorth > 0 ? 'positive' : 'negative'}>
-                          {fmt(point.netWorth)}
-                        </td>
-                        <td>{point.isRetired ? 'Retired' : 'Working'}</td>
-                        <td>{fmt(point.expenses || 0)}</td>
-                        <td>{fmt(point.income || 0)}</td>
-                        <td className="positive">
-                          {fmt(point.coveredByIncome || 0)}
-                          {point.expenses > 0 && (
-                            <small className="pct"> ({formatPercentage((point.coveredByIncome || 0) / point.expenses * 100)})</small>
-                          )}
-                        </td>
-                        <td className="info">
-                          {fmt(point.coveredByReturns || 0)}
-                          {point.expenses > 0 && (
-                            <small className="pct"> ({formatPercentage((point.coveredByReturns || 0) / point.expenses * 100)})</small>
-                          )}
-                        </td>
-                        <td className={point.capitalDrawdown > 0 ? 'negative' : ''}>
-                          {fmt(point.capitalDrawdown || 0)}
-                          {point.expenses > 0 && (
-                            <small className="pct"> ({formatPercentage((point.capitalDrawdown || 0) / point.expenses * 100)})</small>
-                          )}
-                        </td>
-                        <td className={point.drawdownRate > 4 ? 'warning' : point.drawdownRate > 5 ? 'negative' : ''}>
-                          {formatPercentage(point.drawdownRate || 0)}
-                        </td>
-                      </tr>
-                    ))}
+                    .map((point) => {
+                      const netNeeded = Math.max(0, (point.expenses || 0) - (point.income || 0));
+                      return (
+                        <tr key={point.age} className={point.netWorth <= 0 ? 'depleted' : ''}>
+                          <td>{point.age}</td>
+                          <td className={point.netWorth > 0 ? 'positive' : 'negative'}>
+                            {fmt(point.netWorth)}
+                          </td>
+                          <td>{fmt(point.expenses || 0)}</td>
+                          <td className="positive">{fmt(point.income || 0)}</td>
+                          <td className={netNeeded > 0 ? 'negative' : ''}>
+                            {fmt(netNeeded)}
+                          </td>
+                          <td className="negative">
+                            {fmt(point.withdrawalTax || 0)}
+                          </td>
+                          <td className="negative">
+                            {fmt(point.withdrawal || 0)}
+                          </td>
+                          <td className={point.drawdownRate > 5 ? 'negative' : point.drawdownRate > 4 ? 'warning' : ''}>
+                            {formatPercentage(point.drawdownRate || 0)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>

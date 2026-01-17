@@ -1,0 +1,244 @@
+/* ============================================
+   Keyboard Shortcuts Help Modal
+   ============================================ */
+
+.keyboard-shortcuts-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: overlay-fade-in 0.2s ease-out;
+}
+
+.keyboard-shortcuts-modal {
+  background: white;
+  border-radius: 0.75rem;
+  max-width: 600px;
+  width: 90%;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: modal-slide-in 0.3s ease-out;
+}
+
+.keyboard-shortcuts-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.keyboard-shortcuts-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  transition: all 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background-color: var(--color-bg, #f3f4f6);
+  color: var(--color-text, #1f2937);
+}
+
+.keyboard-shortcuts-content {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.shortcuts-section {
+  margin-bottom: 2rem;
+}
+
+.shortcuts-section:last-child {
+  margin-bottom: 0;
+}
+
+.shortcuts-section h3 {
+  margin: 0 0 1rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  background-color: var(--color-bg, #f9fafb);
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease;
+}
+
+.shortcut-item:hover {
+  background-color: #f3f4f6;
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.key {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background-color: white;
+  border: 1px solid #d1d5db;
+  border-radius: 0.25rem;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  min-width: 1.75rem;
+  text-align: center;
+}
+
+.key-separator {
+  margin: 0 0.125rem;
+  color: var(--color-text-muted, #6b7280);
+  font-weight: 600;
+}
+
+.shortcut-description {
+  flex: 1;
+  font-size: 0.875rem;
+  color: var(--color-text, #1f2937);
+}
+
+.keyboard-shortcuts-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  background-color: var(--color-bg, #f9fafb);
+}
+
+.keyboard-shortcuts-footer .text-muted {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #6b7280);
+  text-align: center;
+}
+
+/* Animations */
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .keyboard-shortcuts-modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+
+  .keyboard-shortcuts-header {
+    padding: 1rem;
+  }
+
+  .keyboard-shortcuts-content {
+    padding: 1rem;
+  }
+
+  .shortcut-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .keyboard-shortcuts-footer {
+    padding: 0.75rem 1rem;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .keyboard-shortcuts-modal {
+    background-color: #1f2937;
+  }
+
+  .keyboard-shortcuts-header {
+    border-bottom-color: #374151;
+  }
+
+  .keyboard-shortcuts-header h2 {
+    color: #f9fafb;
+  }
+
+  .shortcut-item {
+    background-color: #111827;
+  }
+
+  .shortcut-item:hover {
+    background-color: #1f2937;
+  }
+
+  .key {
+    background-color: #374151;
+    border-color: #4b5563;
+    color: #f3f4f6;
+  }
+
+  .shortcut-description {
+    color: #e5e7eb;
+  }
+
+  .keyboard-shortcuts-footer {
+    background-color: #111827;
+    border-top-color: #374151;
+  }
+}

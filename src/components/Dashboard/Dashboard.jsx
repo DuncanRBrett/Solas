@@ -10,6 +10,7 @@ import {
 } from '../../utils/calculations';
 import AllocationCharts from './AllocationCharts';
 import PortfolioQualityCard from './PortfolioQualityCard';
+import CapitalGainsCard from './CapitalGainsCard';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -52,6 +53,40 @@ function Dashboard() {
     );
     const netWorth = grossAssets - totalLiabilities;
 
+    // Calculate CGT liability and realisable net worth
+    const marginalTaxRate = settings.profile?.marginalTaxRate || 45; // Stored as percentage
+    let totalCGT = 0;
+    let taxableGain = 0;
+
+    assets.forEach(asset => {
+      // Only investible assets, exclude TFSA
+      if (asset.assetType !== 'Investible' || asset.accountType === 'TFSA') {
+        return;
+      }
+
+      const currentValue = calculateAssetValue(asset, settings);
+      const costBasis = toReporting(asset.units * asset.costPrice, asset.currency);
+      const gain = currentValue - costBasis;
+
+      if (gain > 0) {
+        taxableGain += gain;
+      }
+    });
+
+    // CGT: 40% inclusion rate × marginal tax rate
+    totalCGT = taxableGain * 0.40 * (marginalTaxRate / 100); // Convert percentage to decimal
+
+    // Realisable Net Worth = Net Worth - CGT Liability
+    const realisableNetWorth = netWorth - totalCGT;
+
+    // Calculate net worth in other currencies
+    const netWorthInOtherCurrencies = {};
+    Object.keys(exchangeRates).forEach(currency => {
+      if (currency !== reportingCurrency) {
+        netWorthInOtherCurrencies[currency] = netWorth / exchangeRates[currency];
+      }
+    });
+
     // Calculate withdrawal amounts for each strategy
     const conservative = calculateSafeWithdrawal(investibleAssets, withdrawalRates.conservative);
     const safe = calculateSafeWithdrawal(investibleAssets, withdrawalRates.safe);
@@ -77,6 +112,9 @@ function Dashboard() {
       nonInvestibleAssets,
       totalLiabilities,
       netWorth,
+      totalCGT,
+      realisableNetWorth,
+      netWorthInOtherCurrencies,
       annualExpenses,
       withdrawalRates,
       reportingCurrency,
@@ -97,7 +135,7 @@ function Dashboard() {
     <div className="dashboard">
       <h2>Dashboard - {profile.name}</h2>
 
-      {/* Top Stats Row */}
+      {/* Top Stats Row - Comprehensive Net Worth Overview */}
       <div className="stats-row">
         <div className="stat-card">
           <div className="stat-label">Investable Assets</div>
@@ -105,15 +143,59 @@ function Dashboard() {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">Liabilities</div>
+          <div className="stat-label">Non-Investable Assets</div>
+          <div className="stat-value">{stats.fmt(stats.nonInvestibleAssets)}</div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-label">Total Assets</div>
+          <div className="stat-value">{stats.fmt(stats.grossAssets)}</div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-label">Total Liabilities</div>
           <div className="stat-value">{stats.fmt(stats.totalLiabilities)}</div>
         </div>
 
         <div className="stat-card highlight">
-          <div className="stat-label">Net Worth</div>
+          <div className="stat-label">Total Net Worth</div>
           <div className="stat-value success">{stats.fmt(stats.netWorth)}</div>
         </div>
+
+        <div className="stat-card warning">
+          <div className="stat-label">Potential CGT Liability</div>
+          <div className="stat-value">{stats.fmt(stats.totalCGT)}</div>
+          <div className="stat-subtitle">If sold today</div>
+        </div>
+
+        <div className="stat-card highlight">
+          <div className="stat-label">Realisable Net Worth</div>
+          <div className="stat-value success">{stats.fmt(stats.realisableNetWorth)}</div>
+          <div className="stat-subtitle">After CGT</div>
+        </div>
       </div>
+
+      {/* Net Worth in Other Currencies */}
+      {Object.keys(stats.netWorthInOtherCurrencies).length > 0 && (
+        <div className="currency-conversion-row">
+          <h3>Total Net Worth in Other Currencies</h3>
+          <div className="currency-conversion-grid">
+            {Object.entries(stats.netWorthInOtherCurrencies).map(([currency, value]) => (
+              <div key={currency} className="currency-conversion-card">
+                <div className="currency-label">{currency}</div>
+                <div className="currency-value">
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: currency,
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  }).format(value)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Two Column Layout */}
       <div className="dashboard-grid">
@@ -185,6 +267,14 @@ function Dashboard() {
             </div>
           )}
           </div>
+        </div>
+      </div>
+
+      {/* Financial Insights Row */}
+      <div className="financial-insights-row">
+        {/* Capital Gains */}
+        <div className="insight-card">
+          <CapitalGainsCard />
         </div>
       </div>
 

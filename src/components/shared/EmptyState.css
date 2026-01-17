@@ -1,0 +1,128 @@
+/* ============================================
+   EmptyState Component
+   ============================================ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+  text-align: center;
+  background-color: var(--color-card, #ffffff);
+  border-radius: 0.5rem;
+  border: 2px dashed var(--color-border, #e5e7eb);
+}
+
+.empty-state--compact {
+  padding: 2rem 1.5rem;
+  border: 1px dashed var(--color-border, #e5e7eb);
+}
+
+/* Icon */
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.8;
+}
+
+.empty-state--compact .empty-state-icon {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Title */
+.empty-state-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+}
+
+.empty-state--compact .empty-state-title {
+  font-size: 1rem;
+  margin-bottom: 0.375rem;
+}
+
+/* Message */
+.empty-state-message {
+  margin: 0 0 1.5rem 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #6b7280);
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+.empty-state--compact .empty-state-message {
+  font-size: 0.8125rem;
+  margin-bottom: 1rem;
+  max-width: 300px;
+}
+
+/* Actions */
+.empty-state-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.empty-state--compact .empty-state-actions {
+  gap: 0.5rem;
+}
+
+/* Animation */
+.empty-state {
+  animation: empty-state-fade-in 0.3s ease-out;
+}
+
+@keyframes empty-state-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .empty-state {
+    background-color: var(--color-card-dark, #1f2937);
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .empty-state-title {
+    color: var(--color-text-dark, #f9fafb);
+  }
+
+  .empty-state-message {
+    color: var(--color-text-muted-dark, #9ca3af);
+  }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .empty-state {
+    padding: 2rem 1rem;
+  }
+
+  .empty-state-icon {
+    font-size: 2.5rem;
+  }
+
+  .empty-state-title {
+    font-size: 1.125rem;
+  }
+
+  .empty-state-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .empty-state-actions button {
+    width: 100%;
+  }
+}

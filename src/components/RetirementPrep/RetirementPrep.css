@@ -223,6 +223,55 @@
   text-align: center;
 }
 
+.age-input {
+  width: 45px;
+  padding: 0.2rem 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.percent-input {
+  width: 45px;
+  padding: 0.2rem 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.income-breakdown {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+}
+
+.accumulating-text {
+  color: var(--color-primary);
+  font-style: italic;
+}
+
+.badge.accumulating {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+tr.accumulating td {
+  background-color: #f0f9ff;
+}
+
+.ready-text {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.shortfall-text {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
 .positive {
   color: var(--color-success);
   font-weight: 500;
@@ -248,6 +297,123 @@
 .badge.not-ready {
   background-color: #fef3c7;
   color: #92400e;
+}
+
+/* Drawdown Rate Styling */
+.safe {
+  color: var(--color-success);
+}
+
+.warning {
+  color: #d97706;
+  font-weight: 500;
+}
+
+.danger {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.rate-warning {
+  display: block;
+  font-size: 0.625rem;
+  margin-top: 0.125rem;
+}
+
+/* Shortfall row styling */
+tr.shortfall {
+  background-color: #fef2f2;
+}
+
+tr.shortfall td {
+  border-color: #fecaca;
+}
+
+/* CGT Column Styling */
+.tax-cost {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.tax-breakdown {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+}
+
+.no-tax {
+  color: var(--color-text-muted);
+}
+
+/* Tax note under withdrawal */
+.tax-note {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+}
+
+/* Comparison callout */
+.comparison-callout {
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+  color: #1e40af;
+}
+
+.cgt-note {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background-color: #f8fafc;
+  border-radius: 0.25rem;
+  border-left: 3px solid var(--color-border);
+}
+
+.cgt-note small {
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* Inflated projections section */
+.inflated-section {
+  margin-top: 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+
+.inflated-section summary {
+  cursor: pointer;
+  font-weight: 500;
+  padding: 0.5rem;
+  color: var(--color-primary);
+}
+
+.inflated-section summary:hover {
+  text-decoration: underline;
+}
+
+.inflated-section table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+}
+
+.inflated-section th,
+.inflated-section td {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.inflated-section th {
+  font-weight: 600;
+  background-color: var(--color-bg);
 }
 
 /* Gap Analysis */
@@ -370,6 +536,148 @@
 
 .next-steps li:last-child {
   border-bottom: none;
+}
+
+/* Assumptions Grid */
+.assumptions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.assumption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background: var(--color-background);
+  border-radius: 4px;
+}
+
+.assumption span {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.assumption strong {
+  font-size: 1.1rem;
+  color: var(--color-primary);
+}
+
+.assumption small {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+/* Collapsible Sections */
+.collapsible-section {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.collapsible-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--color-background);
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+}
+
+.collapsible-header:hover {
+  background: #e9ecef;
+}
+
+.collapsible-header span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.collapsible-header small {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Year-by-Year Table */
+.year-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.year-table th,
+.year-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.year-table th {
+  background: var(--color-background);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.year-table th:first-child,
+.year-table td:first-child {
+  text-align: left;
+}
+
+.year-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.year-table tr.working {
+  background-color: #f0fdf4;
+}
+
+.year-table tr.exhausted {
+  background-color: #fef2f2;
+}
+
+.year-table tr.exhausted td {
+  color: #dc2626;
+}
+
+.year-table tr.high-drawdown {
+  background-color: #fef2f2;
+}
+
+.year-table tr.elevated-drawdown {
+  background-color: #fffbeb;
+}
+
+/* Sticky header for tables */
+.year-table.sticky-header {
+  position: relative;
+}
+
+.year-table.sticky-header thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.year-table.sticky-header thead th {
+  background: #f8f9fa;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 @media (max-width: 1200px) {

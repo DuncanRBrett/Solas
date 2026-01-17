@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
+import EmptyState from '../shared/EmptyState';
+import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts';
 import {
   createDefaultAsset,
   ASSET_CLASSES,
@@ -12,6 +14,7 @@ import {
   PORTFOLIOS,
   DEFAULT_PLATFORMS,
   DEFAULT_ENABLED_CURRENCIES,
+  DEFAULT_SETTINGS,
   getCurrencySymbol,
 } from '../../models/defaults';
 import {
@@ -37,6 +40,7 @@ function Assets() {
   const [sortBy, setSortBy] = useState('name'); // name, assetClass, platform, value, gainPct
   const [sortDirection, setSortDirection] = useState('asc'); // asc, desc
   const { confirmDialog, showConfirm } = useConfirmDialog();
+  const { registerShortcut, unregisterShortcut } = useKeyboardShortcuts();
 
   const { assets, settings } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
@@ -47,6 +51,20 @@ function Assets() {
 
   // Helper to format amounts in reporting currency
   const fmt = (amount, decimals = 0) => formatInReportingCurrency(amount, decimals, reportingCurrency);
+
+  // Helper to get platform name (supports both old and new format)
+  const getPlatformName = (platformId) => {
+    if (!platformId) return '-';
+
+    // Check if platforms is new format (array of objects)
+    if (Array.isArray(platforms) && platforms.length > 0 && typeof platforms[0] === 'object') {
+      const platform = platforms.find(p => p.id === platformId);
+      return platform ? platform.name : platformId;
+    }
+
+    // Legacy format: platformId is the name
+    return platformId;
+  };
 
   // Helper to calculate asset value in reporting currency
   const getAssetValue = (asset) => calculateAssetValue(asset, settings);
@@ -63,18 +81,98 @@ function Assets() {
     return currentValue - costBasis;
   };
 
-  // Calculate total portfolio value for % of total
-  const totalPortfolioValue = assets.reduce((total, asset) => {
-    return total + getAssetValue(asset);
-  }, 0);
+  // Get expected return for an asset (uses asset-level override or falls back to asset class default)
+  const getExpectedReturn = (asset) => {
+    if (asset.expectedReturn !== null && asset.expectedReturn !== undefined) {
+      return asset.expectedReturn;
+    }
+    const expectedReturns = settings.expectedReturns || DEFAULT_SETTINGS.expectedReturns;
+    return expectedReturns[asset.assetClass] || 0;
+  };
 
-  // Calculate investible and non-investible assets
-  const totalInvestibleAssets = assets
-    .filter(a => a.assetType === 'Investible')
-    .reduce((total, asset) => total + getAssetValue(asset), 0);
-  const totalNonInvestibleAssets = assets
-    .filter(a => a.assetType === 'Non-Investible')
-    .reduce((total, asset) => total + getAssetValue(asset), 0);
+  // Calculate total portfolio value for % of total (MEMOIZED for performance)
+  const { totalPortfolioValue, totalInvestibleAssets, totalNonInvestibleAssets, projectedGrowth } = useMemo(() => {
+    let totalPortfolio = 0;
+    let totalInvestible = 0;
+    let totalNonInvestible = 0;
+    let weightedReturnSum = 0;
+
+    // Single loop for efficiency
+    assets.forEach(asset => {
+      const value = getAssetValue(asset);
+      totalPortfolio += value;
+
+      if (asset.assetType === 'Investible') {
+        totalInvestible += value;
+        // Calculate weighted return contribution (value * expected return)
+        const expectedReturn = getExpectedReturn(asset);
+        const ter = asset.ter || 0;
+        const netReturn = expectedReturn - ter; // Net of fees
+        weightedReturnSum += value * (netReturn / 100);
+      } else if (asset.assetType === 'Non-Investible') {
+        totalNonInvestible += value;
+      }
+    });
+
+    return {
+      totalPortfolioValue: totalPortfolio,
+      totalInvestibleAssets: totalInvestible,
+      totalNonInvestibleAssets: totalNonInvestible,
+      projectedGrowth: weightedReturnSum, // Annual growth in reporting currency
+    };
+  }, [assets, settings]); // Recalculate only when assets or settings change
+
+  // Calculate weighted average return for investible assets
+  const weightedAverageReturn = useMemo(() => {
+    if (totalInvestibleAssets === 0) return 0;
+    return (projectedGrowth / totalInvestibleAssets) * 100;
+  }, [projectedGrowth, totalInvestibleAssets]);
+
+  // Calculate net worth projection by age
+  const netWorthByAge = useMemo(() => {
+    const currentAge = settings.profile?.age || 55;
+    const lifeExpectancy = settings.profile?.lifeExpectancy || 90;
+    const inflation = settings.profile?.expectedInflation ?? 4.5;
+    const expectedReturns = settings.expectedReturns || DEFAULT_SETTINGS.expectedReturns;
+
+    // Calculate weighted average return for investible assets (net of TER)
+    let weightedReturn = 0;
+    if (totalInvestibleAssets > 0) {
+      assets.forEach(asset => {
+        if (asset.assetType === 'Investible') {
+          const value = getAssetValue(asset);
+          const assetReturn = getExpectedReturn(asset);
+          const ter = asset.ter || 0;
+          const netReturn = assetReturn - ter;
+          weightedReturn += (value / totalInvestibleAssets) * netReturn;
+        }
+      });
+    }
+
+    // Real return (after inflation)
+    const realReturn = weightedReturn - inflation;
+
+    const projections = [];
+    let currentNominal = totalInvestibleAssets;
+    let currentReal = totalInvestibleAssets;
+
+    // Project for each year up to life expectancy (max 40 years for display)
+    const maxYears = Math.min(lifeExpectancy - currentAge, 40);
+
+    for (let i = 0; i <= maxYears; i += 5) { // Every 5 years
+      const age = currentAge + i;
+      const nominalFactor = Math.pow(1 + weightedReturn / 100, i);
+      const realFactor = Math.pow(1 + realReturn / 100, i);
+
+      projections.push({
+        age,
+        nominal: totalInvestibleAssets * nominalFactor,
+        real: totalInvestibleAssets * realFactor,
+      });
+    }
+
+    return { projections, weightedReturn, realReturn };
+  }, [assets, settings, totalInvestibleAssets]);
 
   const handleAdd = () => {
     setFormData(createDefaultAsset());
@@ -140,6 +238,26 @@ function Assets() {
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    // Ctrl+N to add new asset
+    registerShortcut('ctrl+n', () => {
+      if (!isAdding && !editingAsset) {
+        setIsAdding(true);
+      }
+    });
+
+    // Escape to cancel
+    if (isAdding || editingAsset) {
+      registerShortcut('escape', handleCancel);
+    }
+
+    return () => {
+      unregisterShortcut('ctrl+n');
+      unregisterShortcut('escape');
+    };
+  }, [isAdding, editingAsset, registerShortcut, unregisterShortcut]);
 
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -213,7 +331,52 @@ function Assets() {
           <p className="highlight">{fmt(totalNonInvestibleAssets)}</p>
           <small>Primary home, collectibles, etc.</small>
         </div>
+        <div className="summary-card projected">
+          <h4>Projected Annual Growth</h4>
+          <p className="highlight positive">{fmt(projectedGrowth)}</p>
+          <small>
+            {weightedAverageReturn.toFixed(1)}% weighted avg return (net of TER)
+          </small>
+        </div>
       </div>
+
+      {/* Net Worth Projection Table */}
+      {totalInvestibleAssets > 0 && (
+        <div className="card">
+          <h3>Net Worth Projection by Age</h3>
+          <p className="info-text" style={{ marginBottom: '1rem' }}>
+            Projected growth of investible assets ({fmt(totalInvestibleAssets)}) based on weighted average return of{' '}
+            <strong>{netWorthByAge.weightedReturn.toFixed(1)}%</strong> p.a.
+            (real return after {settings.profile?.expectedInflation ?? 4.5}% inflation:{' '}
+            <strong>{netWorthByAge.realReturn.toFixed(1)}%</strong> p.a.)
+          </p>
+
+          <div className="table-container">
+            <table className="projection-table">
+              <thead>
+                <tr>
+                  <th>Age</th>
+                  <th>Nominal Value</th>
+                  <th>Real Value (Today's Money)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {netWorthByAge.projections.map((row) => (
+                  <tr key={row.age}>
+                    <td><strong>{row.age}</strong></td>
+                    <td>{fmt(row.nominal)}</td>
+                    <td>{fmt(row.real)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>
+            Note: This is a simple projection using current portfolio composition. It does not account for
+            contributions, withdrawals, or rebalancing. Use Scenarios for detailed retirement planning.
+          </p>
+        </div>
+      )}
 
       {/* Asset Form */}
       {(isAdding || editingAsset) && (
@@ -295,13 +458,23 @@ function Assets() {
                 onChange={(e) => handleChange('platform', e.target.value)}
               >
                 <option value="">Select...</option>
-                {platforms.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-                <option value="Other">Other</option>
+                {Array.isArray(platforms) && platforms.length > 0 && typeof platforms[0] === 'object' ? (
+                  // New format: array of objects with id/name
+                  platforms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))
+                ) : (
+                  // Legacy format: array of strings (backward compatibility)
+                  platforms.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))
+                )}
               </select>
+              <small>Platform where asset is held</small>
             </div>
 
             <div className="form-group">
@@ -382,6 +555,17 @@ function Assets() {
               <small>Total Expense Ratio - reduces net returns</small>
             </div>
 
+            <div className="form-group full-width">
+              <label>Performance Fee Notes</label>
+              <input
+                type="text"
+                value={formData.performanceFeeNotes || ''}
+                onChange={(e) => handleChange('performanceFeeNotes', e.target.value)}
+                placeholder="e.g., 1.5% + 20% of profits above benchmark"
+              />
+              <small>Complex fee structures that cannot be calculated automatically. For reference only.</small>
+            </div>
+
             <div className="form-group">
               <label>Account Type</label>
               <select
@@ -394,6 +578,18 @@ function Assets() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="form-group checkbox-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.excludeFromAdvisorFee || false}
+                  onChange={(e) => handleChange('excludeFromAdvisorFee', e.target.checked)}
+                />
+                Exclude from advisor fee
+              </label>
+              <small>Check to exclude this asset from advisor fee calculations</small>
             </div>
 
             <div className="form-group">
@@ -458,43 +654,45 @@ function Assets() {
 
       {/* Assets Table */}
       <div className="card">
-        <div className="table-container">
-          <table className="assets-table">
-            <thead>
-              <tr>
-                <th className="sortable" onClick={() => handleSort('name')}>
-                  Name {sortBy === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th className="sortable" onClick={() => handleSort('assetClass')}>
-                  Class {sortBy === 'assetClass' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th>Type</th>
-                <th className="sortable" onClick={() => handleSort('platform')}>
-                  Platform {sortBy === 'platform' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th>Currency</th>
-                <th>Units</th>
-                <th>Price</th>
-                <th className="sortable" onClick={() => handleSort('value')}>
-                  Value ({reportingCurrency}) {sortBy === 'value' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th>% of Total</th>
-                <th className="sortable" onClick={() => handleSort('gainPct')}>
-                  Gain % {sortBy === 'gainPct' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th>Gain ({reportingCurrency})</th>
-                <th>TER</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.length === 0 && (
+        {assets.length === 0 ? (
+          <EmptyState
+            icon="📊"
+            title="No assets yet"
+            message="Start building your portfolio by adding your first asset. Track stocks, ETFs, bonds, property, and more."
+            actionLabel="Add Asset"
+            onAction={() => setIsAdding(true)}
+          />
+        ) : (
+          <div className="table-container">
+            <table className="assets-table">
+              <thead>
                 <tr>
-                  <td colSpan="13" className="no-data">
-                    No assets yet. Click "Add Asset" to get started.
-                  </td>
+                  <th className="sortable" onClick={() => handleSort('name')}>
+                    Name {sortBy === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('assetClass')}>
+                    Class {sortBy === 'assetClass' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th>Type</th>
+                  <th className="sortable" onClick={() => handleSort('platform')}>
+                    Platform {sortBy === 'platform' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th>Currency</th>
+                  <th>Units</th>
+                  <th>Price</th>
+                  <th className="sortable" onClick={() => handleSort('value')}>
+                    Value ({reportingCurrency}) {sortBy === 'value' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th>% of Total</th>
+                  <th className="sortable" onClick={() => handleSort('gainPct')}>
+                    Gain % {sortBy === 'gainPct' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th>Gain ({reportingCurrency})</th>
+                  <th>TER</th>
+                  <th>Actions</th>
                 </tr>
-              )}
+              </thead>
+              <tbody>
               {sortedAssets.map((asset) => {
                 const assetValue = getAssetValue(asset);
                 const gainPct = calculateGainPercentage(asset);
@@ -510,7 +708,7 @@ function Assets() {
                         {asset.assetType}
                       </span>
                     </td>
-                    <td>{asset.platform || '-'}</td>
+                    <td>{getPlatformName(asset.platform)}</td>
                     <td>{asset.currency}</td>
                     <td>{asset.units.toLocaleString()}</td>
                     <td>{formatCurrency(asset.currentPrice, 2, asset.currency)}</td>
@@ -545,9 +743,10 @@ function Assets() {
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

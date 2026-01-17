@@ -1,0 +1,185 @@
+/* TaxSettings.css - Styles for tax configuration */
+
+.tax-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Tax Brackets Table */
+.tax-brackets-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.tax-bracket-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr 1fr 40px;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--color-background-dark, #f5f5f5);
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.tax-bracket-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr 1fr 40px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tax-bracket-row input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.tax-bracket-row input::placeholder {
+  color: var(--color-text-muted, #999);
+  font-style: italic;
+}
+
+.tax-bracket-row .btn-small {
+  padding: 0.25rem 0.5rem;
+  font-size: 1rem;
+}
+
+/* CGT Effective Rates */
+.cgt-effective-rates {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border, #ddd);
+}
+
+.cgt-effective-rates h4 {
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary, #666);
+}
+
+.effective-rates-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.effective-rate-item {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 1rem;
+  background: var(--color-background-alt, #f9f9f9);
+  border-radius: 6px;
+  min-width: 120px;
+}
+
+.effective-rate-item .bracket-rate {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #666);
+}
+
+.effective-rate-item .effective-rate {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-primary, #007bff);
+}
+
+/* Tax Calculator */
+.tax-calculator {
+  background: linear-gradient(135deg, var(--color-background-alt, #f9f9f9), var(--color-background, #fff));
+}
+
+.tax-calculation-results {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--color-background, #fff);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 8px;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border-light, #eee);
+}
+
+.result-row:last-child {
+  border-bottom: none;
+}
+
+.result-row.total {
+  font-weight: 700;
+  font-size: 1.1rem;
+  padding: 0.75rem 0;
+  border-top: 2px solid var(--color-border, #ddd);
+  margin-top: 0.5rem;
+}
+
+.result-row.highlight {
+  background: var(--color-success-light, #d4edda);
+  margin: 0.5rem -1rem -1rem -1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0 0 8px 8px;
+  font-weight: 600;
+  color: var(--color-success, #28a745);
+}
+
+/* Settings Actions */
+.tax-settings .settings-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border, #ddd);
+}
+
+/* Form grid improvements */
+.tax-settings .form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.tax-settings .form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #888);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .tax-bracket-header,
+  .tax-bracket-row {
+    grid-template-columns: 1fr 1fr 0.6fr 1fr 32px;
+    font-size: 0.8rem;
+  }
+
+  .tax-bracket-row input {
+    padding: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .effective-rates-grid {
+    flex-direction: column;
+  }
+
+  .effective-rate-item {
+    min-width: unset;
+  }
+
+  .tax-settings .settings-actions {
+    flex-direction: column;
+  }
+
+  .tax-settings .settings-actions button {
+    width: 100%;
+  }
+}

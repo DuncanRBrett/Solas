@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import useStore from '../../store/useStore';
 import { calculateRetirementReadiness } from '../../services/scenarioCalculations';
 import {
@@ -10,26 +10,30 @@ import {
   toLegacyExchangeRates,
   getExchangeRates,
 } from '../../utils/calculations';
+import { DEFAULT_SETTINGS } from '../../models/defaults';
 import './RetirementPrep.css';
 
 function RetirementPrep() {
   const { profile, updateSettings } = useStore();
-  const { settings, income, expenses, assets, expenseCategories = [] } = profile;
+  const { settings, income, expenses, assets, expenseCategories = [], ageBasedExpensePlan } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
   // Use legacy format for backward compatibility with existing calculations
   const exchangeRates = toLegacyExchangeRates(settings);
 
+  // Collapsible section state
+  const [showInflatedTable, setShowInflatedTable] = useState(false);
+  const [showTodaysMoneyTable, setShowTodaysMoneyTable] = useState(false);
+
   // Helper to format amounts in reporting currency
   const fmt = (amount, decimals = 0) => formatInReportingCurrency(amount, decimals, reportingCurrency);
 
-  // Safely get settings with defaults
-  const retirementExpensePhases = settings?.retirementExpensePhases || {
-    phase1: { ageStart: 60, ageEnd: 69, percentage: 100 },
-    phase2: { ageStart: 70, ageEnd: 79, percentage: 80 },
-    phase3: { ageStart: 80, ageEnd: 90, percentage: 60 },
-  };
+  // Safely get settings with defaults - now using 4 phases
+  const currentAge = settings?.profile?.age || 55;
+  const retirementAge = settings?.profile?.retirementAge || 65;
+  const lifeExpectancy = settings?.profile?.lifeExpectancy || 90;
+  const inflationRate = settings?.profile?.expectedInflation ?? 4.5;
+
   const withdrawalRates = settings?.withdrawalRates || { conservative: 3, safe: 4, aggressive: 5 };
-  const inflationRate = settings?.inflation || 4.5;
 
   // Calculate readiness
   const readiness = useMemo(() => {
@@ -75,14 +79,18 @@ function RetirementPrep() {
       .reduce((sum, i) => sum + toZAR(i.monthlyAmount, i.currency, exchangeRates) * 12, 0);
   }, [income, settings?.profile?.age, exchangeRates]);
 
-  // Calculate retirement income (income sources active after retirement age + investment income)
+  // Calculate retirement income (income sources that continue AFTER retirement age + investment income)
+  // Excludes work income that ends at retirement
   const retirementIncome = useMemo(() => {
     const retirementAge = settings?.profile?.retirementAge || 65;
     const incomeSourcesInRetirement = (income || [])
       .filter(i => {
+        // Only include income sources that:
+        // 1. Start before or at retirement AND
+        // 2. Continue beyond retirement (endAge is null OR endAge > retirementAge)
         const startsBeforeOrAtRetirement = i.startAge === null || i.startAge <= retirementAge;
-        const endsAfterRetirement = i.endAge === null || i.endAge >= retirementAge;
-        return startsBeforeOrAtRetirement && endsAfterRetirement;
+        const continuesBeyondRetirement = i.endAge === null || i.endAge > retirementAge;
+        return startsBeforeOrAtRetirement && continuesBeyondRetirement;
       })
       .reduce((sum, i) => sum + toZAR(i.monthlyAmount, i.currency, exchangeRates) * 12, 0);
 
@@ -91,18 +99,6 @@ function RetirementPrep() {
 
     return incomeSourcesInRetirement + assetIncome;
   }, [income, settings?.profile?.retirementAge, exchangeRates, readiness.assetIncome]);
-
-  // Handle expense phase changes
-  const handlePhaseChange = (phase, field, value) => {
-    const newPhases = {
-      ...retirementExpensePhases,
-      [phase]: {
-        ...retirementExpensePhases[phase],
-        [field]: parseInt(value) || 0,
-      },
-    };
-    updateSettings({ retirementExpensePhases: newPhases });
-  };
 
   // Handle withdrawal rate changes
   const handleRateChange = (rateType, value) => {
@@ -167,6 +163,48 @@ function RetirementPrep() {
           <p className="number">{fmt(retirementIncome)}</p>
           <small>Pensions + Asset Income</small>
         </div>
+      </div>
+
+      {/* Assumptions Card */}
+      <div className="card">
+        <h3>Key Assumptions (from Settings)</h3>
+        <div className="assumptions-grid">
+          <div className="assumption">
+            <span>Portfolio Return</span>
+            <strong>{readiness.nominalReturn?.toFixed(1) || '10.0'}% p.a.</strong>
+            <small>Weighted avg (net of TER)</small>
+          </div>
+          <div className="assumption">
+            <span>Inflation</span>
+            <strong>{readiness.inflationRate?.toFixed(1) || '4.5'}% p.a.</strong>
+          </div>
+          <div className="assumption">
+            <span>Real Return</span>
+            <strong>{readiness.realReturn?.toFixed(1) || '5.5'}% p.a.</strong>
+            <small>After inflation</small>
+          </div>
+          <div className="assumption">
+            <span>Effective Tax Rate</span>
+            <strong>{readiness.effectiveTaxRate?.toFixed(1) || '0'}%</strong>
+            <small>On withdrawals (est.)</small>
+          </div>
+          <div className="assumption">
+            <span>Gain Ratio</span>
+            <strong>{readiness.gainRatio?.toFixed(0) || '0'}%</strong>
+            <small>Taxable portfolio</small>
+          </div>
+          <div className="assumption">
+            <span>Income Growth</span>
+            <strong>{readiness.incomeGrowthRate?.toFixed(1) || '5.0'}% p.a.</strong>
+          </div>
+          <div className="assumption">
+            <span>Safe Withdrawal</span>
+            <strong>{withdrawalRates.safe}% p.a.</strong>
+          </div>
+        </div>
+        <p className="info-text" style={{ marginTop: '0.75rem' }}>
+          These values come from your Settings. Portfolio return is calculated as a weighted average across your investible assets.
+        </p>
       </div>
 
       {/* Asset Income Breakdown */}
@@ -251,126 +289,180 @@ function RetirementPrep() {
         </details>
       </div>
 
-      {/* Expense Phase Breakdown */}
-      <div className="card">
-        <h3>Retirement Expense Phases</h3>
-        <p className="info-text">
-          Expenses grow with inflation ({inflationRate}% p.a.) and typically decrease as you age.
-          Values shown are inflation-adjusted to mid-point of each phase.
-        </p>
+      {/* Year-by-Year Projection Tables */}
+      {readiness.yearByYear && readiness.yearByYear.length > 0 && (
+        <div className="card">
+          <h3>Year-by-Year Projection</h3>
 
-        {readiness.phases && readiness.phases.length > 0 ? (
-          <div className="phase-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Age Range</th>
-                  <th>Expense %</th>
-                  <th>Expenses (Today)</th>
-                  <th>Expenses (Inflated)</th>
-                  <th>Income (Inflated)</th>
-                  <th>Withdrawal Needed</th>
-                  <th>Portfolio Required</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {readiness.phases.map((phase, index) => (
-                  <tr key={index} className={phase.hasSurplus ? 'surplus' : 'needs-withdrawal'}>
-                    <td>{phase.label}</td>
-                    <td>
-                      <input
-                        type="number"
-                        className="phase-input"
-                        value={phase.percentage}
-                        onChange={(e) => handlePhaseChange(`phase${index + 1}`, 'percentage', e.target.value)}
-                      />%
-                    </td>
-                    <td>{fmt(phase.expensesToday || 0)}</td>
-                    <td>
-                      {fmt(phase.expenses)}
-                      <small className="inflation-note">×{(phase.inflationFactor || 1).toFixed(2)}</small>
-                    </td>
-                    <td>{fmt(phase.income)}</td>
-                    <td className={phase.withdrawalNeeded > 0 ? 'negative' : 'positive'}>
-                      {phase.withdrawalNeeded > 0
-                        ? fmt(phase.withdrawalNeeded)
-                        : 'Surplus!'}
-                    </td>
-                    <td>{fmt(phase.portfolioRequired)}</td>
-                    <td>
-                      {readiness.investibleAssets >= phase.portfolioRequired ? (
-                        <span className="badge ready">Ready</span>
-                      ) : (
-                        <span className="badge not-ready">
-                          Need {fmt(phase.portfolioRequired - readiness.investibleAssets)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">Add expenses to see phase breakdown.</p>
-        )}
+          {/* Inflated (Nominal) Table */}
+          <div className="collapsible-section">
+            <button
+              className="collapsible-header"
+              onClick={() => setShowInflatedTable(!showInflatedTable)}
+            >
+              <span>{showInflatedTable ? '▼' : '▶'} Inflated Values (Future Money)</span>
+              <small>What amounts will actually be in future {reportingCurrency}</small>
+            </button>
 
-        {/* Customize age ranges */}
-        <details className="customize-section">
-          <summary>Customize Age Ranges</summary>
-          <div className="form-grid compact">
-            <div className="form-group">
-              <label>Phase 1 Start Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase1.ageStart}
-                onChange={(e) => handlePhaseChange('phase1', 'ageStart', e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Phase 1 End Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase1.ageEnd}
-                onChange={(e) => handlePhaseChange('phase1', 'ageEnd', e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Phase 2 Start Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase2.ageStart}
-                onChange={(e) => handlePhaseChange('phase2', 'ageStart', e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Phase 2 End Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase2.ageEnd}
-                onChange={(e) => handlePhaseChange('phase2', 'ageEnd', e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Phase 3 Start Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase3.ageStart}
-                onChange={(e) => handlePhaseChange('phase3', 'ageStart', e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Phase 3 End Age</label>
-              <input
-                type="number"
-                value={retirementExpensePhases.phase3.ageEnd}
-                onChange={(e) => handlePhaseChange('phase3', 'ageEnd', e.target.value)}
-              />
-            </div>
+            {showInflatedTable && (
+              <div className="table-scroll">
+                <table className="year-table sticky-header">
+                  <thead>
+                    <tr>
+                      <th>Age</th>
+                      <th>Year</th>
+                      <th>Phase</th>
+                      <th>% Exp</th>
+                      <th>Expenses</th>
+                      <th>Gross Income</th>
+                      <th>Income Tax</th>
+                      <th>Net Income</th>
+                      <th>Drawdown</th>
+                      <th>CGT</th>
+                      <th>Total Tax</th>
+                      <th>Rate</th>
+                      <th>Portfolio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {readiness.yearByYear.map((row) => (
+                      <tr
+                        key={row.age}
+                        className={
+                          row.portfolioExhausted ? 'exhausted' :
+                          row.drawdownPercentage > 5 ? 'high-drawdown' :
+                          row.drawdownPercentage > 4 ? 'elevated-drawdown' :
+                          ''
+                        }
+                      >
+                        <td><strong>{row.age}</strong></td>
+                        <td>{row.year}</td>
+                        <td>{row.phase}</td>
+                        <td>{row.expensePercentage.toFixed(0)}%</td>
+                        <td>{fmt(row.expensesInflated)}</td>
+                        <td className="positive">{fmt(row.grossIncomeInflated)}</td>
+                        <td className={row.incomeTax > 0 ? 'negative' : ''}>
+                          {row.incomeTax > 0 ? fmt(row.incomeTax) : '—'}
+                        </td>
+                        <td className="positive">{fmt(row.netIncomeInflated)}</td>
+                        <td className={row.drawdown > 0 ? 'negative' : ''}>
+                          {row.drawdown > 0 ? fmt(row.drawdown) : '—'}
+                        </td>
+                        <td className={row.cgtOnWithdrawal > 0 ? 'negative' : ''}>
+                          {row.cgtOnWithdrawal > 0 ? fmt(row.cgtOnWithdrawal) : '—'}
+                        </td>
+                        <td className={row.totalTax > 0 ? 'negative' : ''}>
+                          {row.totalTax > 0 ? fmt(row.totalTax) : '—'}
+                        </td>
+                        <td className={
+                          row.drawdownPercentage > 5 ? 'danger' :
+                          row.drawdownPercentage > 4 ? 'warning' :
+                          row.drawdownPercentage > 0 ? 'safe' : ''
+                        }>
+                          {row.drawdownPercentage > 0 ? `${row.drawdownPercentage.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className={row.portfolioNominal > 0 ? 'positive' : 'negative'}>
+                          {fmt(row.portfolioNominal)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </details>
-      </div>
+
+          {/* Today's Money (Real) Table */}
+          <div className="collapsible-section" style={{ marginTop: '1rem' }}>
+            <button
+              className="collapsible-header"
+              onClick={() => setShowTodaysMoneyTable(!showTodaysMoneyTable)}
+            >
+              <span>{showTodaysMoneyTable ? '▼' : '▶'} Today's Money (Purchasing Power)</span>
+              <small>All values adjusted to today's purchasing power (0% inflation, 0% income growth)</small>
+            </button>
+
+            {showTodaysMoneyTable && (
+              <div className="table-scroll">
+                <table className="year-table sticky-header">
+                  <thead>
+                    <tr>
+                      <th>Age</th>
+                      <th>Year</th>
+                      <th>Phase</th>
+                      <th>% Exp</th>
+                      <th>Expenses</th>
+                      <th>Gross Income</th>
+                      <th>Income Tax</th>
+                      <th>Net Income</th>
+                      <th>Drawdown</th>
+                      <th>CGT</th>
+                      <th>Total Tax</th>
+                      <th>Rate</th>
+                      <th>Portfolio (Real)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {readiness.yearByYear.map((row) => (
+                      <tr
+                        key={row.age}
+                        className={
+                          row.portfolioReal <= 0 ? 'exhausted' :
+                          row.drawdownPercentageReal > 5 ? 'high-drawdown' :
+                          row.drawdownPercentageReal > 4 ? 'elevated-drawdown' :
+                          ''
+                        }
+                      >
+                        <td><strong>{row.age}</strong></td>
+                        <td>{row.year}</td>
+                        <td>{row.phase}</td>
+                        <td>{row.expensePercentage.toFixed(0)}%</td>
+                        <td>{fmt(row.expensesToday)}</td>
+                        <td className="positive">{fmt(row.grossIncomeToday)}</td>
+                        <td className={row.incomeTaxToday > 0 ? 'negative' : ''}>
+                          {row.incomeTaxToday > 0 ? fmt(row.incomeTaxToday) : '—'}
+                        </td>
+                        <td className="positive">{fmt(row.netIncomeToday)}</td>
+                        <td className={row.drawdownToday > 0 ? 'negative' : ''}>
+                          {row.drawdownToday > 0 ? fmt(row.drawdownToday) : '—'}
+                        </td>
+                        <td className={row.cgtToday > 0 ? 'negative' : ''}>
+                          {row.cgtToday > 0 ? fmt(row.cgtToday) : '—'}
+                        </td>
+                        <td className={row.totalTaxToday > 0 ? 'negative' : ''}>
+                          {row.totalTaxToday > 0 ? fmt(row.totalTaxToday) : '—'}
+                        </td>
+                        <td className={
+                          row.drawdownPercentageReal > 5 ? 'danger' :
+                          row.drawdownPercentageReal > 4 ? 'warning' :
+                          row.drawdownPercentageReal > 0 ? 'safe' : ''
+                        }>
+                          {row.drawdownPercentageReal > 0 ? `${row.drawdownPercentageReal.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className={row.portfolioReal > 0 ? 'positive' : 'negative'}>
+                          {fmt(row.portfolioReal)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="info-text" style={{ marginTop: '0.5rem' }}>
+                  <strong>Today's Money Table:</strong> Shows real purchasing power. Portfolio grows at real return ({readiness.realReturn?.toFixed(1)}% = {readiness.nominalReturn?.toFixed(1)}% - {readiness.inflationRate}% inflation).
+                  Income and expenses are constant in today's money. This table shows whether your money will actually last.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <p className="cgt-note" style={{ marginTop: '1rem' }}>
+            <small>
+              <strong>Income Tax:</strong> Applied at {readiness.marginalTaxRate || settings?.profile?.marginalTaxRate || 39}% marginal rate on taxable income sources (salary, pension, etc.).<br/>
+              <strong>CGT:</strong> Estimated at {readiness.effectiveTaxRate?.toFixed(1) || '0'}% effective rate on withdrawals. Based on your account mix (TFSA: 0%, Taxable: CGT on {readiness.gainRatio?.toFixed(0) || '0'}% gain portion, RA: income tax).<br/>
+              <strong>Drawdown:</strong> From investible assets only. Non-investible assets ({fmt(actualNonInvestibleAssets)}) grow at inflation rate only and can be drawn on when investible portfolio is exhausted.
+            </small>
+          </p>
+        </div>
+      )}
 
       {/* Gap Analysis - Always show with appropriate content */}
       <div className={`card gap-analysis ${readiness.isReady ? 'surplus' : ''}`}>

@@ -13,32 +13,50 @@
 /* Top Stats Row */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
   margin-bottom: 2rem;
 }
 
 .stat-card {
   background: white;
-  padding: 1.5rem;
+  padding: 1rem;
   border-radius: 0.5rem;
   border: 1px solid var(--color-border);
+  min-width: 0; /* Prevent overflow */
 }
 
 .stat-card.highlight {
   background: white;
 }
 
+.stat-card.warning {
+  background: white;
+  border-color: var(--color-warning);
+}
+
+.stat-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
 .stat-label {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
   margin-bottom: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-value {
-  font-size: 1.875rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--color-text);
+  word-break: break-all;
+  line-height: 1.3;
+  overflow-wrap: break-word;
 }
 
 .stat-value.success {
@@ -342,8 +360,159 @@
   }
 }
 
+/* Financial Insights Row */
+.financial-insights-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.insight-card {
+  min-width: 0; /* Prevent grid blowout */
+}
+
+@media (max-width: 1024px) {
+  .recommendation-options {
+    grid-template-columns: 1fr;
+  }
+
+  .financial-insights-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Currency Conversion Row */
+.currency-conversion-row {
+  background: white;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  margin-bottom: 2rem;
+}
+
+.currency-conversion-row h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 0.75rem 0;
+}
+
+.currency-conversion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.currency-conversion-card {
+  background: var(--color-bg);
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  text-align: center;
+  min-width: 0;
+}
+
+.currency-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.currency-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 1600px) {
+  .stats-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .stat-value {
+    font-size: 1.1rem;
+  }
+}
+
+@media (max-width: 1200px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stat-value {
+    font-size: 1rem;
+  }
+
+  .stat-card {
+    padding: 0.875rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .currency-conversion-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .stats-row {
     grid-template-columns: 1fr;
+  }
+
+  .financial-insights-row {
+    grid-template-columns: 1fr;
+  }
+
+  .currency-conversion-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  .stat-label {
+    font-size: 0.875rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .stats-row {
+    gap: 0.75rem;
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .stat-card {
+    padding: 0.875rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .currency-conversion-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+  }
+
+  .stat-value {
+    font-size: 1.1rem;
+  }
+
+  .stat-subtitle {
+    font-size: 0.65rem;
   }
 }

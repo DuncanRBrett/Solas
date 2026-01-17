@@ -12,30 +12,56 @@
 
 import {
   calculateInvestibleAssets,
+  calculateNonInvestibleAssets,
+  calculateAssetValue,
   calculateAssetValueZAR,
   toZAR,
   toLegacyExchangeRates,
 } from '../utils/calculations';
+import { calculateScenarioYearFees } from './feeCalculations';
+import {
+  calculateIncomeTax as calculateIncomeTaxFromTables,
+  calculateCGT,
+  getMarginalTaxRate,
+  getTaxRebate,
+} from './taxCalculations';
+import { DEFAULT_SETTINGS } from '../models/defaults';
 
 /**
  * Calculate expense multiplier based on age phase
+ * Supports both legacy 3-phase and new 4-phase life phases configurations
  */
 export const getExpenseMultiplier = (age, expensePhases) => {
   if (!expensePhases) return 1.0;
 
-  const { phase1, phase2, phase3 } = expensePhases;
+  // New 4-phase life phases structure (working, activeRetirement, slowerPace, laterYears)
+  const { working, activeRetirement, slowerPace, laterYears, phase1, phase2, phase3, phase4 } = expensePhases;
 
+  // Try new 4-phase structure first
+  if (working && age >= working.ageStart && age <= working.ageEnd) {
+    return working.percentage / 100;
+  } else if (activeRetirement && age >= activeRetirement.ageStart && age <= activeRetirement.ageEnd) {
+    return activeRetirement.percentage / 100;
+  } else if (slowerPace && age >= slowerPace.ageStart && age <= slowerPace.ageEnd) {
+    return slowerPace.percentage / 100;
+  } else if (laterYears && age >= laterYears.ageStart) {
+    return laterYears.percentage / 100;
+  }
+
+  // Fallback to legacy 3/4-phase structure
   if (phase1 && age >= phase1.ageStart && age <= phase1.ageEnd) {
     return phase1.percentage / 100;
-  }
-  if (phase2 && age >= phase2.ageStart && age <= phase2.ageEnd) {
+  } else if (phase2 && age >= phase2.ageStart && age <= phase2.ageEnd) {
     return phase2.percentage / 100;
-  }
-  if (phase3 && age >= phase3.ageStart) {
+  } else if (phase3 && age >= phase3.ageStart && age <= phase3.ageEnd) {
+    return phase3.percentage / 100;
+  } else if (phase4 && age >= phase4.ageStart) {
+    return phase4.percentage / 100;
+  } else if (phase3 && age >= phase3.ageStart) {
+    // Fallback for old 3-phase format where phase3 is final
     return phase3.percentage / 100;
   }
 
-  // Before retirement phases (still working)
   return 1.0;
 };
 
@@ -104,10 +130,21 @@ export const calculateIncomeAtAge = (age, incomeSources, exchangeRates, inflatio
 };
 
 /**
- * Calculate tax on income (simplified South African tax)
+ * Calculate tax on income using SA tax tables
+ * Falls back to simplified marginal rate if tax config not available
+ * @param {number} taxableIncome - Annual taxable income
+ * @param {number} age - Person's age (for rebates)
+ * @param {object} taxConfig - Tax configuration from settings
+ * @param {number} marginalTaxRate - Fallback marginal rate if no tax config
  */
-export const calculateIncomeTax = (taxableIncome, marginalTaxRate) => {
-  // Simplified: just apply marginal rate
+export const calculateIncomeTax = (taxableIncome, age, taxConfig, marginalTaxRate) => {
+  // If we have tax config with brackets, use proper tax table calculation
+  if (taxConfig && taxConfig.incomeTaxBrackets && taxConfig.incomeTaxBrackets.length > 0) {
+    const result = calculateIncomeTaxFromTables(taxableIncome, age, taxConfig);
+    return result.netTax;
+  }
+
+  // Fallback to simplified marginal rate calculation
   return taxableIncome * (marginalTaxRate / 100);
 };
 
@@ -141,6 +178,171 @@ export const calculateWithdrawalTaxRate = (assets, marginalTaxRate) => {
 };
 
 /**
+ * Calculate CGT impact on a capital withdrawal
+ * Returns the CGT amount and gross withdrawal needed to net the required amount
+ *
+ * Logic:
+ * - Assumes proportional withdrawal from all investible assets
+ * - TFSA: No CGT
+ * - Taxable: CGT on gain portion (40% inclusion × marginal rate)
+ * - RA: Taxed as income (marginal rate) - different mechanism
+ */
+export const calculateWithdrawalCGT = (withdrawalAmount, assets, exchangeRates, marginalTaxRate) => {
+  if (withdrawalAmount <= 0 || !assets || assets.length === 0) {
+    return { cgt: 0, grossWithdrawal: withdrawalAmount, netWithdrawal: withdrawalAmount };
+  }
+
+  // Calculate portfolio totals by account type
+  const investibleAssets = assets.filter(a => a.assetType === 'Investible');
+
+  let totalValue = 0;
+  let totalCost = 0;
+  let tfsaValue = 0;
+  let taxableValue = 0;
+  let taxableCost = 0;
+  let raValue = 0;
+
+  investibleAssets.forEach(asset => {
+    const value = calculateAssetValueZAR(asset, exchangeRates);
+    const cost = (asset.units || 0) * (asset.costPrice || 0) * (exchangeRates[asset.currency] || 1);
+
+    totalValue += value;
+    totalCost += cost;
+
+    if (asset.accountType === 'TFSA') {
+      tfsaValue += value;
+    } else if (asset.accountType === 'RA') {
+      raValue += value;
+    } else {
+      // Taxable or unspecified
+      taxableValue += value;
+      taxableCost += cost;
+    }
+  });
+
+  if (totalValue === 0) {
+    return { cgt: 0, grossWithdrawal: withdrawalAmount, netWithdrawal: withdrawalAmount };
+  }
+
+  // Assume proportional withdrawal from each account type
+  const tfsaWithdrawal = withdrawalAmount * (tfsaValue / totalValue);
+  const taxableWithdrawal = withdrawalAmount * (taxableValue / totalValue);
+  const raWithdrawal = withdrawalAmount * (raValue / totalValue);
+
+  // Calculate CGT on taxable withdrawal
+  // The gain ratio for taxable accounts
+  const taxableGainRatio = taxableValue > 0 ? Math.max(0, (taxableValue - taxableCost) / taxableValue) : 0;
+  const gainOnWithdrawal = taxableWithdrawal * taxableGainRatio;
+
+  // CGT = gain × 40% inclusion × marginal rate
+  const cgtRate = 0.4 * (marginalTaxRate / 100);
+  const cgt = gainOnWithdrawal * cgtRate;
+
+  // For RA, the full amount would be taxed as income at marginal rate
+  // But this is typically only relevant when actually withdrawing (not for projection)
+  // We'll include it for completeness but note it's a simplification
+  const raTax = raWithdrawal * (marginalTaxRate / 100);
+
+  // Total tax on the withdrawal
+  const totalTax = cgt + raTax;
+
+  return {
+    cgt,                                    // CGT specifically (Taxable accounts)
+    raTax,                                  // Income tax on RA withdrawal
+    totalTax,                               // Combined tax (CGT + RA tax)
+    grossWithdrawal: withdrawalAmount,      // What you withdraw
+    netWithdrawal: withdrawalAmount - totalTax,  // What you keep after tax
+    // For reverse calculation: how much gross to withdraw to get net amount
+    grossForNet: withdrawalAmount / (1 - (totalTax / withdrawalAmount || 0)),
+    taxableGainRatio,                       // Proportion of taxable that is gain
+    accountMix: {
+      tfsa: tfsaValue / totalValue,
+      taxable: taxableValue / totalValue,
+      ra: raValue / totalValue,
+    },
+  };
+};
+
+/**
+ * Calculate account type weights for withdrawal tax calculation
+ * Returns the proportion of investible assets in each account type
+ *
+ * @param {Array} assets - Array of asset objects
+ * @param {object} exchangeRates - Exchange rates for currency conversion
+ * @returns {object} { tfsa, taxable, ra } - weights summing to 1
+ */
+export const calculateAccountTypeWeights = (assets, exchangeRates) => {
+  let tfsaValue = 0;
+  let taxableValue = 0;
+  let raValue = 0;
+
+  (assets || []).forEach(asset => {
+    if (asset.assetType === 'Investible') {
+      const value = calculateAssetValueZAR(asset, exchangeRates);
+
+      if (asset.accountType === 'TFSA') {
+        tfsaValue += value;
+      } else if (asset.accountType === 'RA') {
+        raValue += value;
+      } else {
+        // Taxable or unspecified - default to taxable
+        taxableValue += value;
+      }
+    }
+  });
+
+  const totalValue = tfsaValue + taxableValue + raValue;
+  if (totalValue === 0) {
+    return { tfsa: 0, taxable: 1, ra: 0 }; // Default to all taxable
+  }
+
+  return {
+    tfsa: tfsaValue / totalValue,
+    taxable: taxableValue / totalValue,
+    ra: raValue / totalValue,
+  };
+};
+
+/**
+ * Calculate portfolio-wide gain ratio for taxable accounts only
+ * This is the percentage of the taxable portfolio that is unrealized gain
+ * Used to estimate CGT more accurately (CGT only applies to gains, not entire withdrawal)
+ *
+ * @param {Array} assets - Array of asset objects
+ * @param {object} exchangeRates - Exchange rates for currency conversion
+ * @returns {object} { gainRatio, totalValue, totalCost, totalGain }
+ */
+export const calculateTaxablePortfolioGainRatio = (assets, exchangeRates) => {
+  let totalValue = 0;
+  let totalCost = 0;
+
+  (assets || []).forEach(asset => {
+    // Only include investible assets in taxable accounts (not TFSA or RA)
+    if (asset.assetType === 'Investible' && asset.accountType !== 'TFSA' && asset.accountType !== 'RA') {
+      const value = calculateAssetValueZAR(asset, exchangeRates);
+      const cost = (asset.units || 0) * (asset.costPrice || 0) * (exchangeRates[`${asset.currency}/ZAR`] || 1);
+
+      totalValue += value;
+      totalCost += cost;
+    }
+  });
+
+  // Calculate gain ratio (what % of the portfolio is gain)
+  // If totalValue is 0, return 0 ratio
+  // If cost >= value (no gain or loss), return 0 ratio
+  const totalGain = Math.max(0, totalValue - totalCost);
+  const gainRatio = totalValue > 0 ? totalGain / totalValue : 0;
+
+  return {
+    gainRatio,           // Proportion of taxable portfolio that is gain (0-1)
+    totalValue,          // Total value of taxable assets
+    totalCost,           // Total cost basis of taxable assets
+    totalGain,           // Total unrealized gain
+    gainPercentage: gainRatio * 100,  // As percentage for display
+  };
+};
+
+/**
  * Calculate equity percentage of portfolio
  */
 export const calculateEquityPercentage = (assets) => {
@@ -163,6 +365,9 @@ export const calculateEquityPercentage = (assets) => {
 
 /**
  * Get monthly expense amount for a specific age from age-based plan
+ * Supports both:
+ * - New format: categoryExpenses = { categoryName: totalAmount }
+ * - Old format: expenses = { categoryName: { subcategoryName: amount } }
  */
 export const getMonthlyExpensesForAge = (age, ageBasedPlan, expenseCategories) => {
   if (!ageBasedPlan || !ageBasedPlan.enabled || !ageBasedPlan.phases) {
@@ -181,16 +386,88 @@ export const getMonthlyExpensesForAge = (age, ageBasedPlan, expenseCategories) =
   // Sum up all expenses for this phase
   let totalMonthly = 0;
 
-  expenseCategories.forEach(category => {
-    const categoryExpenses = applicablePhase.expenses[category.name] || {};
-
-    category.subcategories.forEach(subcategory => {
-      const amount = categoryExpenses[subcategory.name] || 0;
-      totalMonthly += amount;
+  // Check if using new format (categoryExpenses) or old format (expenses)
+  if (applicablePhase.categoryExpenses) {
+    // New format: direct category totals
+    Object.values(applicablePhase.categoryExpenses).forEach(amount => {
+      totalMonthly += amount || 0;
     });
-  });
+  } else if (applicablePhase.expenses) {
+    // Old format: nested subcategory amounts
+    expenseCategories.forEach(category => {
+      const categoryExpenses = applicablePhase.expenses[category.name] || {};
+
+      if (typeof categoryExpenses === 'object') {
+        category.subcategories.forEach(subcategory => {
+          const amount = categoryExpenses[subcategory.name] || 0;
+          totalMonthly += amount;
+        });
+      }
+    });
+  }
 
   return totalMonthly;
+};
+
+/**
+ * Calculate weighted portfolio return based on asset class allocation
+ * Uses scenario returns if useCustomReturns is true, otherwise settings returns
+ */
+export const calculateWeightedPortfolioReturn = (assets, exchangeRates, scenarioReturns, settingsReturns) => {
+  const expectedReturns = scenarioReturns || settingsReturns || {};
+
+  // Group assets by asset class and calculate total value
+  const assetClassValues = {};
+  let totalValue = 0;
+
+  assets.forEach(asset => {
+    if (asset.assetType === 'Investible') {
+      const value = calculateAssetValueZAR(asset, exchangeRates);
+      const assetClass = asset.assetClass || 'Cash';
+      assetClassValues[assetClass] = (assetClassValues[assetClass] || 0) + value;
+      totalValue += value;
+    }
+  });
+
+  if (totalValue === 0) {
+    // Fallback to offshore equity return if no assets
+    return expectedReturns['Offshore Equity'] || 10;
+  }
+
+  // Calculate weighted return
+  let weightedReturn = 0;
+  Object.entries(assetClassValues).forEach(([assetClass, value]) => {
+    const weight = value / totalValue;
+    const assetReturn = expectedReturns[assetClass] || 8; // Default to 8% if not specified
+    weightedReturn += weight * assetReturn;
+  });
+
+  return weightedReturn;
+};
+
+/**
+ * Calculate asset class percentages for crash impact
+ */
+export const calculateAssetClassPercentages = (assets, exchangeRates) => {
+  const assetClassValues = {};
+  let totalValue = 0;
+
+  assets.forEach(asset => {
+    if (asset.assetType === 'Investible') {
+      const value = calculateAssetValueZAR(asset, exchangeRates);
+      const assetClass = asset.assetClass || 'Cash';
+      assetClassValues[assetClass] = (assetClassValues[assetClass] || 0) + value;
+      totalValue += value;
+    }
+  });
+
+  // Convert to percentages
+  const percentages = {};
+  Object.entries(assetClassValues).forEach(([assetClass, value]) => {
+    percentages[assetClass] = totalValue > 0 ? value / totalValue : 0;
+  });
+
+  return percentages;
 };
 
 /**
@@ -200,18 +477,39 @@ export const runScenario = (scenario, profile) => {
   const { assets, income, expenses, settings, expenseCategories = [], ageBasedExpensePlan } = profile;
   // Use legacy format for backward compatibility with existing calculations
   const exchangeRates = toLegacyExchangeRates(settings);
-  const { age: currentAge, marginalTaxRate } = settings.profile;
-  const retirementExpensePhases = settings.retirementExpensePhases || {
-    phase1: { ageStart: 60, ageEnd: 69, percentage: 100 },
-    phase2: { ageStart: 70, ageEnd: 79, percentage: 80 },
-    phase3: { ageStart: 80, ageEnd: 90, percentage: 60 },
+  const { age: currentAge, marginalTaxRate, defaultCGT } = settings.profile;
+
+  // Get tax configuration - use settings or defaults
+  const taxConfig = settings.taxConfig || DEFAULT_SETTINGS.taxConfig;
+
+  // Get expected returns - scenario can override settings
+  const scenarioReturns = scenario.useCustomReturns ? scenario.expectedReturns : null;
+  const settingsReturns = settings.expectedReturns;
+
+  // Calculate weighted portfolio return based on asset allocation
+  const weightedReturn = calculateWeightedPortfolioReturn(assets, exchangeRates, scenarioReturns, settingsReturns);
+
+  // Get asset class percentages for crash calculations
+  const assetClassPercentages = calculateAssetClassPercentages(assets, exchangeRates);
+
+  // Use scenario-level expense phases if enabled, otherwise fall back to settings
+  // 4-phase model: Working, Active Retirement, Slower Pace, Later Years
+  const defaultExpensePhases = {
+    working: { ageStart: currentAge || 55, ageEnd: (scenario.retirementAge || 65) - 1, percentage: 100 },
+    activeRetirement: { ageStart: scenario.retirementAge || 65, ageEnd: 72, percentage: 100 },
+    slowerPace: { ageStart: 73, ageEnd: 80, percentage: 80 },
+    laterYears: { ageStart: 81, ageEnd: scenario.lifeExpectancy || 90, percentage: 60 },
   };
+  const retirementExpensePhases = scenario.useCustomExpensePhases && scenario.expensePhases
+    ? scenario.expensePhases
+    : (settings.lifePhases || defaultExpensePhases);
 
   // Check if age-based expense planning is enabled
-  const useAgeBasedExpenses = ageBasedExpensePlan?.enabled && expenseCategories.length > 0;
+  // BUT: if scenario has custom expense phases enabled, those take priority
+  const useAgeBasedExpenses = ageBasedExpensePlan?.enabled && expenseCategories.length > 0
+    && !(scenario.useCustomExpensePhases && scenario.expensePhases);
 
   const {
-    marketReturn,
     inflationRate,
     retirementAge,
     lifeExpectancy,
@@ -220,6 +518,8 @@ export const runScenario = (scenario, profile) => {
     annualExpenses: scenarioAnnualExpenses,
     marketCrashes = [],
     unexpectedExpenses = [],
+    useCurrencyMovement,
+    currencyMovement = {},
   } = scenario;
 
   // Calculate base annual expenses (today's money)
@@ -230,12 +530,14 @@ export const runScenario = (scenario, profile) => {
       baseAnnualExpenses = 0;
       expenseCategories.forEach(category => {
         (category.subcategories || []).forEach(sub => {
-          const monthlyAmountOriginal = sub.frequency === 'Annual'
-            ? (sub.monthlyAmount || 0) / 12
-            : (sub.monthlyAmount || 0);
           const currency = sub.currency || 'ZAR';
-          const monthlyAmountZAR = toZAR(monthlyAmountOriginal, currency, exchangeRates);
-          baseAnnualExpenses += monthlyAmountZAR * 12;
+          // When frequency is 'Annual', monthlyAmount field actually contains the annual amount
+          // When frequency is 'Monthly', monthlyAmount field contains the monthly amount
+          const annualAmount = sub.frequency === 'Annual'
+            ? (sub.monthlyAmount || 0)  // Already annual
+            : (sub.monthlyAmount || 0) * 12;  // Convert monthly to annual
+          const annualAmountZAR = toZAR(annualAmount, currency, exchangeRates);
+          baseAnnualExpenses += annualAmountZAR;
         });
       });
     } else if (expenses && expenses.length > 0) {
@@ -255,10 +557,19 @@ export const runScenario = (scenario, profile) => {
   let portfolioValue = calculateInvestibleAssets(assets, exchangeRates);
   const startingPortfolio = portfolioValue;
 
-  // Calculate withdrawal tax rate
-  const withdrawalTaxRate = calculateWithdrawalTaxRate(assets, marginalTaxRate);
+  // Calculate portfolio gain ratio for more accurate CGT estimation
+  // CGT only applies to the gain portion of taxable account withdrawals
+  const gainRatioData = calculateTaxablePortfolioGainRatio(assets, exchangeRates);
+  const initialGainRatio = gainRatioData.gainRatio; // Proportion of taxable portfolio that is gain
 
-  // Calculate equity percentage for crash impact
+  // CGT rate (40% inclusion × marginal rate) - applied only to gain portion
+  const cgtInclusionRate = 0.4;
+  const cgtRate = cgtInclusionRate * (marginalTaxRate / 100);
+
+  // Calculate account type weights for withdrawal tax calculation
+  const accountTypeWeights = calculateAccountTypeWeights(assets, exchangeRates);
+
+  // Calculate equity percentage for crash impact (fallback for legacy crashes)
   const equityPercentage = calculateEquityPercentage(assets);
 
   // Calculate asset-based income (current - will grow with portfolio)
@@ -275,9 +586,11 @@ export const runScenario = (scenario, profile) => {
   let totalCoveredByIncome = 0;
   let totalCoveredByReturns = 0;
   let totalCapitalDrawdown = 0;
+  let totalFeesPaid = 0;
+  let totalWithdrawalTax = 0;
 
-  // Real return calculation
-  const realReturn = ((1 + marketReturn / 100) / (1 + inflationRate / 100) - 1) * 100;
+  // Real return calculation - using weighted portfolio return
+  const realReturn = ((1 + weightedReturn / 100) / (1 + inflationRate / 100) - 1) * 100;
 
   // Run simulation year by year
   for (let age = currentAge; age <= lifeExpectancy; age++) {
@@ -294,6 +607,9 @@ export const runScenario = (scenario, profile) => {
       isRetired: age >= retirementAge,
       expenses: 0,
       income: 0,
+      incomeTax: 0,
+      withdrawalTax: 0,
+      totalTax: 0,
       coveredByIncome: 0,
       coveredByReturns: 0,
       capitalDrawdown: 0,
@@ -342,22 +658,67 @@ export const runScenario = (scenario, profile) => {
 
     // Calculate tax on income (only on taxable portion from sources + interest gross)
     const taxableFromSources = taxableIncome;
-    const incomeTax = calculateIncomeTax(taxableFromSources, marginalTaxRate);
+    const incomeTax = calculateIncomeTax(taxableFromSources, age, taxConfig, marginalTaxRate);
     const netIncome = yearSourceIncome - incomeTax + yearDividendIncome + yearInterestIncome;
 
     totalIncome += netIncome;
 
     if (age < retirementAge) {
-      // Pre-retirement: add savings to portfolio
+      // Pre-retirement: calculate if there's an expense shortfall
       const annualSavings = monthlySavings * 12 * inflationFactor;
+      const netNeeded = inflationAdjustedExpenses - netIncome;
+
+      let yearWithdrawalTax = 0;
+      let yearWithdrawal = 0;
+
+      if (netNeeded > 0) {
+        // Expenses exceed income - need to withdraw from portfolio
+        // Calculate withdrawal tax based on account type mix and gain ratio
+        const tfsaWithdrawal = netNeeded * accountTypeWeights.tfsa;
+        const taxableWithdrawal = netNeeded * accountTypeWeights.taxable;
+        const raWithdrawal = netNeeded * accountTypeWeights.ra;
+
+        const tfsaTax = 0;
+        const taxableTax = taxableWithdrawal * initialGainRatio * cgtRate;
+        const raTax = raWithdrawal * (marginalTaxRate / 100);
+
+        yearWithdrawalTax = tfsaTax + taxableTax + raTax;
+        const grossWithdrawal = netNeeded + yearWithdrawalTax;
+
+        portfolioValue -= grossWithdrawal;
+        totalWithdrawalTax += yearWithdrawalTax;
+        totalWithdrawn += grossWithdrawal;
+        yearWithdrawal = grossWithdrawal;
+      }
+
+      // Add savings to portfolio
       portfolioValue += annualSavings;
 
-      // Grow portfolio
-      portfolioValue *= (1 + marketReturn / 100);
+      // Grow portfolio using weighted return
+      portfolioValue *= (1 + weightedReturn / 100);
+
+      // Apply currency movement for non-reporting currency assets
+      if (useCurrencyMovement && currencyMovement) {
+        // This is a simplified model - in reality, currency movement affects each asset differently
+        // For now, we apply a blended currency effect based on non-ZAR asset allocation
+        // This is captured in the overall return assumption
+      }
+
+      // Deduct fees after growth
+      const yearFees = calculateScenarioYearFees(portfolioValue, settings);
+      portfolioValue -= yearFees.totalFees;
+      totalFeesPaid += yearFees.totalFees;
 
       // Update year data for pre-retirement
+      yearData.expenses = inflationAdjustedExpenses;
       yearData.income = netIncome;
+      yearData.incomeTax = incomeTax;
+      yearData.withdrawalTax = yearWithdrawalTax;
+      yearData.totalTax = incomeTax + yearWithdrawalTax;
       yearData.savings = annualSavings;
+      yearData.withdrawal = yearWithdrawal;
+      // Calculate drawdown rate for pre-retirement too
+      yearData.drawdownRate = yearData.netWorth > 0 ? (yearWithdrawal / yearData.netWorth) * 100 : 0;
 
       trajectory.push(yearData);
     } else {
@@ -374,10 +735,13 @@ export const runScenario = (scenario, profile) => {
       let yearCapitalDrawdown = 0;
       let yearWithdrawal = 0;
 
+      // Track withdrawal tax for this year
+      let yearWithdrawalTax = 0;
+
       if (netNeeded > 0) {
         // Need to withdraw from portfolio
         // Calculate potential returns on current portfolio
-        const potentialReturns = portfolioValue * (marketReturn / 100);
+        const potentialReturns = portfolioValue * (weightedReturn / 100);
 
         // If returns can cover the shortfall, we're using returns not capital
         if (potentialReturns >= netNeeded) {
@@ -393,8 +757,40 @@ export const runScenario = (scenario, profile) => {
           yearCapitalDrawdown = capitalNeeded;
         }
 
-        // Gross up for withdrawal tax
-        const grossWithdrawal = netNeeded / (1 - withdrawalTaxRate);
+        // Calculate withdrawal tax based on account type mix and gain ratio
+        // - TFSA portion: 0% tax
+        // - Taxable portion: CGT only on gain portion (gainRatio × cgtRate)
+        // - RA portion: Full income tax at marginal rate
+        //
+        // Note: This is an ESTIMATE. The gain ratio is based on current portfolio
+        // and may change over time as the portfolio composition shifts.
+
+        // Proportional withdrawal from each account type
+        const tfsaWithdrawal = netNeeded * accountTypeWeights.tfsa;
+        const taxableWithdrawal = netNeeded * accountTypeWeights.taxable;
+        const raWithdrawal = netNeeded * accountTypeWeights.ra;
+
+        // Calculate tax on each portion
+        // TFSA: No tax
+        const tfsaTax = 0;
+
+        // Taxable: CGT only on the GAIN portion of the withdrawal
+        // CGT = withdrawal × gainRatio × 40% inclusion × marginal rate
+        const taxableTax = taxableWithdrawal * initialGainRatio * cgtRate;
+
+        // RA: Full income tax at marginal rate
+        const raTax = raWithdrawal * (marginalTaxRate / 100);
+
+        // Total tax on withdrawal
+        yearWithdrawalTax = tfsaTax + taxableTax + raTax;
+
+        // Calculate effective withdrawal tax rate for this withdrawal
+        const effectiveWithdrawalTaxRate = netNeeded > 0 ? yearWithdrawalTax / netNeeded : 0;
+
+        // Gross withdrawal = net needed + tax (simpler formula than grossing up)
+        const grossWithdrawal = netNeeded + yearWithdrawalTax;
+
+        totalWithdrawalTax += yearWithdrawalTax;
         portfolioValue -= grossWithdrawal;
         totalWithdrawn += grossWithdrawal;
         yearWithdrawal = grossWithdrawal;
@@ -409,6 +805,9 @@ export const runScenario = (scenario, profile) => {
       // Update year data for post-retirement
       yearData.expenses = inflationAdjustedExpenses;
       yearData.income = netIncome;
+      yearData.incomeTax = incomeTax;
+      yearData.withdrawalTax = yearWithdrawalTax;
+      yearData.totalTax = incomeTax + yearWithdrawalTax;
       yearData.coveredByIncome = incomeContribution;
       yearData.coveredByReturns = yearCoveredByReturns;
       yearData.capitalDrawdown = yearCapitalDrawdown;
@@ -417,17 +816,45 @@ export const runScenario = (scenario, profile) => {
 
       trajectory.push(yearData);
 
-      // Grow remaining portfolio
+      // Grow remaining portfolio using weighted return
       if (portfolioValue > 0) {
-        portfolioValue *= (1 + marketReturn / 100);
+        portfolioValue *= (1 + weightedReturn / 100);
+
+        // Deduct fees after growth
+        const yearFees = calculateScenarioYearFees(portfolioValue, settings);
+        portfolioValue -= yearFees.totalFees;
+        totalFeesPaid += yearFees.totalFees;
+        yearData.fees = yearFees.totalFees;
+        yearData.feesBreakdown = yearFees;
       }
     }
 
     // Apply market crash if applicable
     const crash = marketCrashes.find(c => c.age === age);
     if (crash) {
-      // Crash only affects equity portion
-      const crashLoss = portfolioValue * equityPercentage * (crash.dropPercentage / 100);
+      let crashLoss = 0;
+
+      // New format: assetClassDrops with per-asset-class drop percentages
+      if (crash.assetClassDrops && Object.keys(crash.assetClassDrops).length > 0) {
+        Object.entries(crash.assetClassDrops).forEach(([assetClass, dropPercentage]) => {
+          const assetClassWeight = assetClassPercentages[assetClass] || 0;
+          crashLoss += portfolioValue * assetClassWeight * (dropPercentage / 100);
+        });
+      }
+      // Legacy format: affectedAssetClasses with single dropPercentage
+      else if (crash.affectedAssetClasses && crash.affectedAssetClasses.length > 0) {
+        let affectedPercentage = 0;
+        crash.affectedAssetClasses.forEach(assetClass => {
+          affectedPercentage += assetClassPercentages[assetClass] || 0;
+        });
+        crashLoss = portfolioValue * affectedPercentage * (crash.dropPercentage / 100);
+      }
+      // Fallback: equities only with single dropPercentage
+      else if (crash.dropPercentage) {
+        const equityPercentage = (assetClassPercentages['Offshore Equity'] || 0) + (assetClassPercentages['SA Equity'] || 0);
+        crashLoss = portfolioValue * equityPercentage * (crash.dropPercentage / 100);
+      }
+
       portfolioValue -= crashLoss;
     }
 
@@ -468,6 +895,10 @@ export const runScenario = (scenario, profile) => {
     byCapitalDrawdown: { amount: 0, percentage: 0 },
   };
 
+  // Calculate average annual fees
+  const yearsSimulated = lifeExpectancy - currentAge;
+  const averageAnnualFees = yearsSimulated > 0 ? totalFeesPaid / yearsSimulated : 0;
+
   return {
     trajectory,
     success,
@@ -475,38 +906,88 @@ export const runScenario = (scenario, profile) => {
     finalValue,
     shortfall: success ? 0 : Math.abs(finalValue),
     totalWithdrawn,
+    totalWithdrawalTax, // CGT on withdrawals
     totalIncome,
     totalExpenses,
+    totalFeesPaid,
     expenseCoverageBreakdown,
     metrics: {
-      nominalReturn: marketReturn,
+      nominalReturn: weightedReturn, // Weighted portfolio return
       realReturn,
       inflationRate,
-      withdrawalTaxRate: withdrawalTaxRate * 100,
+      // Gain ratio-based CGT estimation (estimate note: based on current portfolio gain ratio)
+      gainRatio: initialGainRatio * 100, // % of taxable portfolio that is gain
+      cgtRate: cgtRate * 100, // CGT rate (40% inclusion × marginal rate)
+      accountTypeWeights, // TFSA/Taxable/RA proportions
       equityPercentage: equityPercentage * 100,
       baseAnnualExpenses,
       startingPortfolio,
       retirementAge,
       lifeExpectancy,
       yearsInRetirement: lifeExpectancy - retirementAge,
+      totalFeesPaid,
+      averageAnnualFees,
+      totalWithdrawalTax,
+      assetClassPercentages, // Include for UI display
     },
     runAt: new Date().toISOString(),
   };
 };
 
 /**
+ * Calculate income for a specific age from all income sources
+ * Returns annual income in today's money, split by taxable/non-taxable
+ */
+const calculateIncomeForAge = (age, incomeSources, exchangeRates) => {
+  let taxableIncome = 0;
+  let nonTaxableIncome = 0;
+
+  (incomeSources || [])
+    .filter(source => {
+      const hasStarted = source.startAge === null || age >= source.startAge;
+      const hasNotEnded = source.endAge === null || age <= source.endAge;
+      return hasStarted && hasNotEnded;
+    })
+    .forEach(source => {
+      const annualAmount = toZAR(source.monthlyAmount, source.currency, exchangeRates) * 12;
+      if (source.isTaxable !== false) {
+        taxableIncome += annualAmount;
+      } else {
+        nonTaxableIncome += annualAmount;
+      }
+    });
+
+  return {
+    taxable: taxableIncome,
+    nonTaxable: nonTaxableIncome,
+    total: taxableIncome + nonTaxableIncome,
+  };
+};
+
+/**
  * Calculate retirement readiness summary
+ *
+ * IMPORTANT: All calculations are done in TODAY'S MONEY for clarity.
+ * This makes the table directly comparable to the Portfolio Withdrawal Capacity section.
+ * The 4% rule and withdrawal rates are designed to work with real (inflation-adjusted) returns,
+ * so using today's money is mathematically correct.
+ *
+ * Features:
+ * - 4 phases: Working Career, Active Retirement, Slower Pace, Later Years
+ * - Income calculated per phase based on income source age brackets
+ * - Shows ending portfolio for each phase
  */
 export const calculateRetirementReadiness = (profile) => {
-  const { assets, income, expenses, expenseCategories, settings } = profile;
+  const { assets, income, expenses, expenseCategories, ageBasedExpensePlan, settings } = profile;
 
   // Safety checks for missing data
-  if (!settings || !settings.currency) {
+  if (!settings || !settings.reportingCurrency) {
     return {
       investibleAssets: 0,
       annualExpenses: 0,
       retirementIncome: 0,
       phases: [],
+      yearByYear: [],
       isReady: false,
       gap: 0,
       surplus: 0,
@@ -515,40 +996,63 @@ export const calculateRetirementReadiness = (profile) => {
       conservativeWithdrawal: 0,
       currentAge: 0,
       retirementAge: 65,
-      lifeExpectancy: 90,
+      lifeExpectancy: 95,
       inflationRate: 4.5,
     };
   }
 
   const exchangeRates = toLegacyExchangeRates(settings);
-  const { age: currentAge, marginalTaxRate, retirementAge, lifeExpectancy } = settings.profile || {};
-  const retirementExpensePhases = settings.retirementExpensePhases || {
-    phase1: { ageStart: 60, ageEnd: 69, percentage: 100 },
-    phase2: { ageStart: 70, ageEnd: 79, percentage: 80 },
-    phase3: { ageStart: 80, ageEnd: 90, percentage: 60 },
+  const {
+    age: currentAge,
+    marginalTaxRate,
+    retirementAge,
+    lifeExpectancy,
+    defaultCGT,
+    expectedInflation,
+    incomeGrowth,
+  } = settings.profile || {};
+
+  // Use user-configured settings with sensible defaults
+  const inflationRate = expectedInflation ?? settings.inflation ?? 4.5;
+  const incomeGrowthRate = (incomeGrowth ?? 5) / 100;
+
+  // CGT calculation using gain ratio approach
+  // CGT = withdrawal × gainRatio × 40% inclusion × marginal rate
+  const cgtInclusionRate = 0.4; // 40% for individuals
+  const cgtRateOnGain = cgtInclusionRate * ((marginalTaxRate || 39) / 100);
+
+  // Get tax configuration - use settings or defaults
+  const taxConfig = settings.taxConfig || DEFAULT_SETTINGS.taxConfig;
+
+  // Use the new 4-phase lifePhases structure (now with 'working' key instead of 'workingCareer')
+  const defaultLifePhases = {
+    working: { name: 'Working', ageStart: currentAge || 55, ageEnd: 64, percentage: 100 },
+    activeRetirement: { name: 'Active Retirement', ageStart: 65, ageEnd: 72, percentage: 100 },
+    slowerPace: { name: 'Slower Pace', ageStart: 73, ageEnd: 80, percentage: 80 },
+    laterYears: { name: 'Later Years', ageStart: 81, ageEnd: lifeExpectancy || 90, percentage: 60 },
   };
+  const lifePhases = settings.lifePhases || defaultLifePhases;
+
   const withdrawalRates = settings.withdrawalRates || { conservative: 3, safe: 4, aggressive: 5 };
-  const inflationRate = settings.inflation || 4.5;
 
-  // Get investible assets
+  // Get investible and non-investible assets (TODAY)
   const investibleAssets = calculateInvestibleAssets(assets || [], exchangeRates);
+  const nonInvestibleAssets = calculateNonInvestibleAssets(assets || [], exchangeRates);
 
-  // Calculate current expenses (in today's money) - use expenseCategories if available
+  // Calculate current expenses (in TODAY's money)
   let annualExpenses = 0;
   if (expenseCategories && expenseCategories.length > 0) {
-    // Use new hierarchical expense categories with currency conversion
     expenseCategories.forEach(category => {
       (category.subcategories || []).forEach(sub => {
-        const amountInCurrency = sub.frequency === 'Annual'
-          ? (sub.monthlyAmount || 0) / 12
-          : (sub.monthlyAmount || 0);
         const currency = sub.currency || 'ZAR';
-        const monthlyAmountZAR = toZAR(amountInCurrency, currency, exchangeRates);
-        annualExpenses += monthlyAmountZAR * 12;
+        const annualAmount = sub.frequency === 'Annual'
+          ? (sub.monthlyAmount || 0)
+          : (sub.monthlyAmount || 0) * 12;
+        const annualAmountZAR = toZAR(annualAmount, currency, exchangeRates);
+        annualExpenses += annualAmountZAR;
       });
     });
   } else if (expenses && expenses.length > 0) {
-    // Fall back to legacy expenses array
     const monthlyExpenses = expenses.reduce((sum, e) => {
       if (e.frequency === 'Monthly') return sum + e.amount;
       return sum + e.amount / 12;
@@ -556,86 +1060,459 @@ export const calculateRetirementReadiness = (profile) => {
     annualExpenses = monthlyExpenses * 12;
   }
 
-  // Calculate retirement income (in today's money)
-  const retirementIncome = (income || [])
-    .filter(i => {
-      const startsBeforeOrAtRetirement = i.startAge === null || i.startAge <= retirementAge;
-      const endsAfterRetirement = i.endAge === null || i.endAge >= retirementAge;
-      return startsBeforeOrAtRetirement && endsAfterRetirement;
-    })
-    .reduce((sum, i) => sum + toZAR(i.monthlyAmount, i.currency, exchangeRates) * 12, 0);
+  // Check if age-based expense planning is enabled
+  const useAgeBasedExpenses = ageBasedExpensePlan?.enabled && ageBasedExpensePlan?.phases?.length > 0;
 
-  // Calculate dividend and interest income from assets
+  // Calculate dividend and interest income from assets (in TODAY's money)
   const dividendIncome = calculateDividendIncomeFromAssets(assets || [], exchangeRates);
   const interestIncome = calculateInterestIncomeFromAssets(assets || [], exchangeRates, marginalTaxRate || 39);
   const assetIncome = dividendIncome + interestIncome.net;
 
-  // Total retirement income including asset income
-  const totalRetirementIncome = retirementIncome + assetIncome;
-
-  // Years to retirement for inflation calculation
+  // Years to retirement
   const yearsToRetirement = Math.max(0, (retirementAge || 65) - (currentAge || 55));
 
-  // Calculate phase breakdown with inflation-adjusted expenses
-  const phases = [
-    { ...retirementExpensePhases.phase1, label: `Ages ${retirementExpensePhases.phase1.ageStart}-${retirementExpensePhases.phase1.ageEnd}` },
-    { ...retirementExpensePhases.phase2, label: `Ages ${retirementExpensePhases.phase2.ageStart}-${retirementExpensePhases.phase2.ageEnd}` },
-    { ...retirementExpensePhases.phase3, label: `Ages ${retirementExpensePhases.phase3.ageStart}+` },
-  ].map((phase, index) => {
-    // Calculate years from now to mid-point of this phase
-    const phaseMidAge = (phase.ageStart + (phase.ageEnd || phase.ageStart + 10)) / 2;
-    const yearsFromNow = Math.max(0, phaseMidAge - (currentAge || 55));
+  // Calculate weighted average return from portfolio (net of TER)
+  let weightedNominalReturn = 0;
+  const expectedReturns = settings.expectedReturns || {};
+  if (investibleAssets > 0 && assets && assets.length > 0) {
+    assets.forEach(asset => {
+      if (asset.assetType === 'Investible') {
+        const assetValue = calculateAssetValue(asset, settings);
+        const assetReturn = asset.expectedReturn ?? expectedReturns[asset.assetClass] ?? 10;
+        const ter = asset.ter || 0;
+        const netReturn = assetReturn - ter;
+        weightedNominalReturn += (assetValue / investibleAssets) * netReturn;
+      }
+    });
+  } else {
+    // Fallback to offshore equity return if no assets
+    weightedNominalReturn = expectedReturns['Offshore Equity'] || 10;
+  }
 
-    // Inflation-adjusted expenses for this phase
-    const inflationFactor = Math.pow(1 + inflationRate / 100, yearsFromNow);
-    const phaseExpenses = annualExpenses * (phase.percentage / 100) * inflationFactor;
+  // Real return rate (nominal - inflation) for forward simulation
+  const realReturn = (weightedNominalReturn - inflationRate) / 100;
 
-    // Income may also be inflation-adjusted (simplified - assume it is)
-    const adjustedIncome = totalRetirementIncome * Math.pow(1 + inflationRate / 100, yearsFromNow);
+  // Calculate portfolio gain ratio and account type weights for CGT estimation
+  // CGT only applies to the gain portion of taxable account withdrawals
+  const gainRatioData = calculateTaxablePortfolioGainRatio(assets || [], exchangeRates);
+  const gainRatio = gainRatioData.gainRatio; // Proportion of taxable portfolio that is gain
+  const accountTypeWeights = calculateAccountTypeWeights(assets || [], exchangeRates);
 
-    const withdrawalNeeded = Math.max(0, phaseExpenses - adjustedIncome);
-    const portfolioRequired = withdrawalNeeded > 0 ? withdrawalNeeded / (withdrawalRates.safe / 100) : 0;
+  // Calculate effective tax rate on withdrawals based on account mix and gain ratio
+  // - TFSA: 0% tax
+  // - Taxable: CGT only on gain portion = gainRatio × cgtRateOnGain
+  // - RA: Full income tax at marginal rate
+  // Note: This is an ESTIMATE. Actual CGT depends on which assets are sold.
+  const effectiveTaxRateTaxable = gainRatio * cgtRateOnGain; // Tax rate on taxable portion
+  const effectiveTaxRateRA = (marginalTaxRate || 39) / 100;  // Tax rate on RA portion
+  const effectiveTaxRate =
+    (accountTypeWeights.tfsa * 0) +
+    (accountTypeWeights.taxable * effectiveTaxRateTaxable) +
+    (accountTypeWeights.ra * effectiveTaxRateRA);
 
+  // Build 4 phases from lifePhases (using new 'working' key)
+  // Use explicit defaults per phase to ensure proper age ranges
+  const phaseDefaults = {
+    working: { name: 'Working', ageStart: currentAge || 55, ageEnd: (retirementAge || 65) - 1, percentage: 100 },
+    activeRetirement: { name: 'Active Retirement', ageStart: retirementAge || 65, ageEnd: 72, percentage: 100 },
+    slowerPace: { name: 'Slower Pace', ageStart: 73, ageEnd: 80, percentage: 80 },
+    laterYears: { name: 'Later Years', ageStart: 81, ageEnd: lifeExpectancy || 90, percentage: 60 },
+  };
+
+  const phaseKeys = ['working', 'activeRetirement', 'slowerPace', 'laterYears'];
+  const phaseConfigs = phaseKeys.map(key => {
+    const defaults = phaseDefaults[key];
+    const userPhase = lifePhases[key] || {};
     return {
-      ...phase,
-      expenses: phaseExpenses,
-      expensesToday: annualExpenses * (phase.percentage / 100),
-      income: adjustedIncome,
-      incomeToday: totalRetirementIncome,
-      withdrawalNeeded,
-      portfolioRequired,
-      hasSurplus: adjustedIncome >= phaseExpenses,
-      inflationFactor,
+      key,
+      name: userPhase.name || defaults.name,
+      ageStart: userPhase.ageStart ?? defaults.ageStart,
+      ageEnd: userPhase.ageEnd ?? defaults.ageEnd,
+      percentage: userPhase.percentage ?? defaults.percentage,
     };
   });
 
-  // Overall readiness based on first phase (highest requirement typically)
-  const maxRequired = Math.max(...phases.map(p => p.portfolioRequired), 0);
-  const isReady = investibleAssets >= maxRequired;
-  const gap = maxRequired - investibleAssets;
+  // Helper to get expense percentage for an age from age-based plan
+  const getAgeBasedExpensePercentage = (age) => {
+    if (!useAgeBasedExpenses) return 100;
+    const phase = ageBasedExpensePlan.phases.find(
+      p => age >= p.startAge && age <= p.endAge
+    );
+    if (!phase || !phase.categoryExpenses) return 100;
+    // Sum category expenses and compare to base
+    const phaseTotal = Object.values(phase.categoryExpenses).reduce((sum, amt) => sum + (amt || 0), 0) * 12;
+    return annualExpenses > 0 ? (phaseTotal / annualExpenses) * 100 : 100;
+  };
 
-  // Calculate safe withdrawal capacity
+  // Calculate phase data - everything in TODAY's money
+  const phases = phaseConfigs.map((phase, index) => {
+    // Duration of this phase
+    const phaseYears = phase.ageEnd - phase.ageStart + 1;
+
+    // Mid-point age for income calculation
+    const midAge = Math.floor((phase.ageStart + phase.ageEnd) / 2);
+
+    // Expenses in TODAY's money (adjusted by phase percentage)
+    const expensesToday = annualExpenses * (phase.percentage / 100);
+
+    // Income at mid-point of this phase (based on age brackets)
+    const incomeBreakdown = calculateIncomeForAge(midAge, income, exchangeRates);
+    const incomeFromSources = incomeBreakdown.total;
+
+    // Asset income (dividends + interest) - constant in real terms
+    const totalIncomeToday = incomeFromSources + assetIncome;
+
+    // Is this a pre-retirement phase (Working)?
+    const isPreRetirement = phase.key === 'working';
+
+    // Net shortfall in TODAY's money (only applies post-retirement)
+    const netShortfallToday = isPreRetirement
+      ? 0  // During working years, assume income covers expenses + savings
+      : Math.max(0, expensesToday - totalIncomeToday);
+
+    // Calculate withdrawal tax using same method as runScenario:
+    // Tax is calculated based on account type mix and gain ratio
+    const phaseTfsaWithdrawal = netShortfallToday * accountTypeWeights.tfsa;
+    const phaseTaxableWithdrawal = netShortfallToday * accountTypeWeights.taxable;
+    const phaseRaWithdrawal = netShortfallToday * accountTypeWeights.ra;
+
+    const phaseTfsaTax = 0;
+    const phaseTaxableTax = phaseTaxableWithdrawal * gainRatio * cgtRateOnGain;
+    const phaseRaTax = phaseRaWithdrawal * ((marginalTaxRate || 39) / 100);
+
+    // Tax on withdrawal
+    const withdrawalTax = phaseTfsaTax + phaseTaxableTax + phaseRaTax;
+
+    // Gross withdrawal needed (pre-tax) in TODAY's money
+    const grossWithdrawalToday = netShortfallToday + withdrawalTax;
+
+    // Portfolio required for this phase using 4% rule (TODAY's money)
+    const portfolioRequiredForPhase = grossWithdrawalToday > 0
+      ? grossWithdrawalToday / (withdrawalRates.safe / 100)
+      : 0;
+
+    return {
+      ...phase,
+      phaseYears,
+      isPreRetirement,
+      // All amounts in TODAY's money
+      expensesToday,
+      incomeFromSources,
+      assetIncome,
+      incomeToday: totalIncomeToday,
+      netShortfallToday,
+      grossWithdrawalToday,
+      withdrawalTax,
+      portfolioRequiredForPhase,
+      hasSurplus: totalIncomeToday >= expensesToday,
+      effectiveTaxRate: effectiveTaxRate * 100,
+    };
+  });
+
+  // Calculate cumulative portfolio requirements working backwards
+  // Skip pre-retirement phases for portfolio requirement calculation
+  const retirementPhases = phases.filter(p => !p.isPreRetirement);
+
+  for (let i = retirementPhases.length - 1; i >= 0; i--) {
+    const phase = retirementPhases[i];
+    const phaseIndex = phases.findIndex(p => p.key === phase.key);
+
+    if (i === retirementPhases.length - 1) {
+      // Last phase: just need 4% rule amount
+      phase.portfolioRequiredCumulative = phase.portfolioRequiredForPhase;
+    } else {
+      // Earlier phases: need to end with enough for next phase
+      const nextPhase = retirementPhases[i + 1];
+      const portfolioNeededAtEnd = nextPhase.portfolioRequiredCumulative;
+
+      // Work backwards through this phase
+      let portfolioNeededAtStart = portfolioNeededAtEnd;
+      for (let year = phase.phaseYears - 1; year >= 0; year--) {
+        portfolioNeededAtStart = (portfolioNeededAtStart + phase.grossWithdrawalToday) / (1 + realReturn);
+      }
+
+      // Take the maximum of: what we need to fund future phases vs 4% rule for this phase
+      phase.portfolioRequiredCumulative = Math.max(
+        phase.portfolioRequiredForPhase,
+        portfolioNeededAtStart
+      );
+    }
+
+    // Update the original phases array
+    phases[phaseIndex].portfolioRequiredCumulative = phase.portfolioRequiredCumulative;
+
+    // Theoretical withdrawal rate if we had exactly the required portfolio
+    phases[phaseIndex].theoreticalWithdrawalRate = phase.portfolioRequiredCumulative > 0
+      ? (phase.grossWithdrawalToday / phase.portfolioRequiredCumulative) * 100
+      : 0;
+  }
+
+  // For working career phase, set portfolio required to what's needed at retirement start
+  const workingPhase = phases.find(p => p.key === 'working');
+  const firstRetirementPhase = phases.find(p => !p.isPreRetirement);
+  if (workingPhase && firstRetirementPhase) {
+    workingPhase.portfolioRequiredCumulative = firstRetirementPhase.portfolioRequiredCumulative;
+    workingPhase.theoreticalWithdrawalRate = 0; // No withdrawals during working years
+  }
+
+  // Forward simulation to see actual status
+  let simulatedPortfolio = investibleAssets;
+  let previousPhaseDepleted = false;
+
+  for (let i = 0; i < phases.length; i++) {
+    const phase = phases[i];
+
+    if (previousPhaseDepleted) {
+      phase.projectedPortfolioAtStart = 0;
+      phase.actualWithdrawalRate = 0;
+      phase.willHaveEnough = false;
+      phase.shortfallAtStart = phase.portfolioRequiredCumulative || 0;
+      phase.projectedPortfolioAtEnd = 0;
+      phase.wontReach = true;
+      phase.status = 'wontReach';
+      continue;
+    }
+
+    phase.projectedPortfolioAtStart = simulatedPortfolio;
+
+    if (phase.isPreRetirement) {
+      // Working career: portfolio grows, no withdrawals (assume savings + returns)
+      // For simplicity, just grow at real return rate
+      for (let year = 0; year < phase.phaseYears; year++) {
+        simulatedPortfolio = simulatedPortfolio * (1 + realReturn);
+      }
+      phase.projectedPortfolioAtEnd = simulatedPortfolio;
+      phase.actualWithdrawalRate = 0;
+      phase.status = 'accumulating';
+      phase.willHaveEnough = true;
+    } else {
+      // Retirement phase: withdrawals happen
+      phase.actualWithdrawalRate = simulatedPortfolio > 0
+        ? (phase.grossWithdrawalToday / simulatedPortfolio) * 100
+        : 0;
+
+      phase.willHaveEnough = simulatedPortfolio >= (phase.portfolioRequiredCumulative || 0);
+      phase.shortfallAtStart = Math.max(0, (phase.portfolioRequiredCumulative || 0) - simulatedPortfolio);
+
+      // Simulate through this phase
+      let depletedDuringPhase = false;
+      let depletionYear = 0;
+
+      for (let year = 0; year < phase.phaseYears; year++) {
+        simulatedPortfolio = simulatedPortfolio * (1 + realReturn) - phase.grossWithdrawalToday;
+
+        if (simulatedPortfolio <= 0 && !depletedDuringPhase) {
+          depletedDuringPhase = true;
+          depletionYear = year + 1;
+          simulatedPortfolio = 0;
+        }
+      }
+
+      phase.projectedPortfolioAtEnd = Math.max(0, simulatedPortfolio);
+
+      if (depletedDuringPhase) {
+        phase.depleted = true;
+        phase.depletionYear = depletionYear;
+        phase.willHaveEnough = false;
+        phase.status = 'depletes';
+        previousPhaseDepleted = true;
+      } else if (!phase.willHaveEnough) {
+        phase.status = 'shortfall';
+      } else {
+        phase.status = 'ready';
+      }
+    }
+  }
+
+  // Overall readiness - do we have enough to fund first retirement phase?
+  const totalRequiredToday = firstRetirementPhase?.portfolioRequiredCumulative || 0;
+  const isReady = simulatedPortfolio >= totalRequiredToday || (workingPhase && workingPhase.projectedPortfolioAtEnd >= totalRequiredToday);
+  const gap = totalRequiredToday - investibleAssets;
+
+  // Withdrawal capacity (TODAY's money)
   const safeWithdrawal = investibleAssets * (withdrawalRates.safe / 100);
   const conservativeWithdrawal = investibleAssets * (withdrawalRates.conservative / 100);
 
+  // Calculate total retirement income (for display)
+  const retirementAge_ = retirementAge || 65;
+  const retirementIncomeBreakdown = calculateIncomeForAge(retirementAge_, income, exchangeRates);
+  const retirementIncomeFromSources = retirementIncomeBreakdown.total;
+  const totalRetirementIncome = retirementIncomeFromSources + assetIncome;
+
+  // Generate year-by-year projection (inflated values)
+  const yearByYear = [];
+  const currentAgeVal = currentAge || 55;
+  const lifeExpectancyVal = lifeExpectancy || 90;
+
+  let portfolioNominal = investibleAssets;
+  let portfolioReal = investibleAssets; // For today's money table
+  const nominalReturn = weightedNominalReturn / 100;
+
+  for (let age = currentAgeVal; age <= lifeExpectancyVal; age++) {
+    const yearsFromNow = age - currentAgeVal;
+    const inflationFactor = Math.pow(1 + inflationRate / 100, yearsFromNow);
+    const incomeInflationFactor = Math.pow(1 + incomeGrowthRate, yearsFromNow);
+
+    // Find which phase this age belongs to
+    const currentPhase = phases.find(p => age >= p.ageStart && age <= p.ageEnd);
+    const phasePercentage = currentPhase?.percentage ?? 100;
+    const phaseName = currentPhase?.name || 'Unknown';
+    const isWorking = currentPhase?.isPreRetirement || false;
+
+    // Get expense percentage from age-based plan if enabled
+    let expensePercentageFromPlan = phasePercentage;
+    if (useAgeBasedExpenses) {
+      expensePercentageFromPlan = getAgeBasedExpensePercentage(age);
+    }
+
+    // Expenses (inflated)
+    const expensesInflated = annualExpenses * (expensePercentageFromPlan / 100) * inflationFactor;
+    const expensesToday = annualExpenses * (expensePercentageFromPlan / 100);
+
+    // Income breakdown - split by taxable/non-taxable
+    const incomeBreakdown = calculateIncomeForAge(age, income, exchangeRates);
+
+    // Gross income from sources (before tax) - grows with income growth rate
+    const grossIncomeFromSources = incomeBreakdown.total * incomeInflationFactor;
+    const taxableIncomeInflated = incomeBreakdown.taxable * incomeInflationFactor;
+    const nonTaxableIncomeInflated = incomeBreakdown.nonTaxable * incomeInflationFactor;
+
+    // Income tax on taxable income (using tax tables if available)
+    const incomeTax = calculateIncomeTax(taxableIncomeInflated, age, taxConfig, marginalTaxRate);
+
+    // Net income from sources (after income tax)
+    const netIncomeFromSources = grossIncomeFromSources - incomeTax;
+
+    // Asset income grows with inflation (already net of withholding tax from calculateDividendIncomeFromAssets)
+    const assetIncomeInflated = assetIncome * inflationFactor;
+
+    // Total gross income (before income tax)
+    const grossIncomeInflated = grossIncomeFromSources + assetIncomeInflated;
+
+    // Total net income available to spend (after income tax)
+    const netIncomeInflated = netIncomeFromSources + assetIncomeInflated;
+
+    // Today's money values
+    const grossIncomeToday = incomeBreakdown.total + assetIncome;
+    const incomeTaxToday = calculateIncomeTax(incomeBreakdown.taxable, age, taxConfig, marginalTaxRate);
+    const netIncomeToday = grossIncomeToday - incomeTaxToday;
+
+    // Net shortfall needed (inflated) - expenses minus NET income (after tax)
+    // Allow drawdown even during working years if expenses exceed income
+    const netShortfall = Math.max(0, expensesInflated - netIncomeInflated);
+
+    // Calculate withdrawal tax using same method as runScenario:
+    // Tax is calculated based on account type mix and gain ratio
+    // - TFSA portion: 0% tax
+    // - Taxable portion: CGT only on gain portion (gainRatio × cgtRateOnGain)
+    // - RA portion: Full income tax at marginal rate
+    const tfsaWithdrawal = netShortfall * accountTypeWeights.tfsa;
+    const taxableWithdrawal = netShortfall * accountTypeWeights.taxable;
+    const raWithdrawal = netShortfall * accountTypeWeights.ra;
+
+    const tfsaTax = 0;
+    const taxableTax = taxableWithdrawal * gainRatio * cgtRateOnGain;
+    const raTax = raWithdrawal * ((marginalTaxRate || 39) / 100);
+
+    // CGT on the withdrawal (sum of all account type taxes)
+    const cgtOnWithdrawal = tfsaTax + taxableTax + raTax;
+
+    // Gross withdrawal = net needed + tax
+    const drawdown = netShortfall + cgtOnWithdrawal;
+
+    // Net withdrawal received (after CGT) - equals netShortfall
+    const withdrawalNeeded = netShortfall;
+
+    // Total tax paid (income tax + CGT)
+    const totalTax = incomeTax + cgtOnWithdrawal;
+
+    // Portfolio at start of year (before growth and drawdown)
+    const portfolioStartOfYear = portfolioNominal;
+
+    // Drawdown as percentage of portfolio (at start of year)
+    const drawdownPercentage = portfolioStartOfYear > 0 ? (drawdown / portfolioStartOfYear) * 100 : 0;
+
+    // Portfolio growth and drawdown
+    const growthAmount = portfolioNominal * nominalReturn;
+    portfolioNominal = portfolioNominal * (1 + nominalReturn) - drawdown;
+
+    // Real portfolio (today's money) - grows at real return minus real drawdown
+    const realDrawdown = drawdown / inflationFactor;
+    const portfolioRealStart = portfolioReal;
+    portfolioReal = portfolioReal * (1 + realReturn) - realDrawdown;
+
+    // Real drawdown percentage (in today's money terms)
+    const drawdownPercentageReal = portfolioRealStart > 0 ? (realDrawdown / portfolioRealStart) * 100 : 0;
+
+    yearByYear.push({
+      age,
+      year: new Date().getFullYear() + yearsFromNow,
+      phase: phaseName,
+      expensePercentage: expensePercentageFromPlan,
+      inflationFactor,
+      // Inflated (nominal) values
+      expensesInflated,
+      grossIncomeInflated,      // Gross income before tax
+      incomeTax,                // Income tax on taxable income
+      netIncomeInflated,        // Net income after tax
+      withdrawalNeeded,         // Net withdrawal received after CGT
+      cgtOnWithdrawal,          // CGT on capital withdrawal
+      totalTax,                 // Total tax (income tax + CGT)
+      drawdown,                 // Gross withdrawal from portfolio
+      drawdownPercentage,
+      portfolioNominal: Math.max(0, portfolioNominal),
+      // Today's money (real) values
+      expensesToday,
+      grossIncomeToday,
+      incomeTaxToday,
+      netIncomeToday,
+      withdrawalToday: withdrawalNeeded / inflationFactor,
+      cgtToday: cgtOnWithdrawal / inflationFactor,
+      totalTaxToday: (incomeTax + cgtOnWithdrawal) / inflationFactor,
+      drawdownToday: realDrawdown,
+      drawdownPercentageReal,
+      portfolioReal: Math.max(0, portfolioReal),
+      // Status
+      isWorking,
+      portfolioExhausted: portfolioNominal <= 0,
+    });
+
+    if (portfolioNominal <= 0) {
+      portfolioNominal = 0;
+      portfolioReal = 0;
+    }
+  }
+
   return {
     investibleAssets,
+    nonInvestibleAssets,
     annualExpenses,
-    retirementIncome,
+    retirementIncome: retirementIncomeFromSources,
     assetIncome,
     totalRetirementIncome,
     dividendIncome,
     interestIncome: interestIncome.net,
     phases,
+    yearByYear,
+    useAgeBasedExpenses,
     isReady,
-    gap: isReady ? 0 : gap,
-    surplus: isReady ? -gap : 0,
+    gap: isReady ? 0 : Math.max(0, gap),
+    surplus: isReady ? Math.max(0, -gap) : 0,
     yearsToRetirement,
     safeWithdrawal,
     conservativeWithdrawal,
-    currentAge: currentAge || 55,
+    currentAge: currentAgeVal,
     retirementAge: retirementAge || 65,
-    lifeExpectancy: lifeExpectancy || 90,
+    lifeExpectancy: lifeExpectancyVal,
     inflationRate,
+    incomeGrowthRate: incomeGrowthRate * 100,
+    realReturn: realReturn * 100,
+    nominalReturn: weightedNominalReturn,
+    // Tax estimation based on gain ratio (estimate note: based on current portfolio)
+    effectiveTaxRate: effectiveTaxRate * 100,
+    gainRatio: gainRatio * 100, // % of taxable portfolio that is gain
+    cgtRateOnGain: cgtRateOnGain * 100, // CGT rate on gains (40% inclusion × marginal)
+    accountTypeWeights, // TFSA/Taxable/RA proportions
+    marginalTaxRate: marginalTaxRate || 39,
   };
 };

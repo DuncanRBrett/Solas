@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
+import LoadingSpinner from '../shared/LoadingSpinner';
 import {
   createDefaultExpenseCategory,
   createDefaultExpenseSubcategory,
@@ -55,6 +56,8 @@ function ExpensesV2() {
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingSubcategory, setEditingSubcategory] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
 
   // Form Data
   const [categoryFormData, setCategoryFormData] = useState(createDefaultExpenseCategory());
@@ -237,8 +240,14 @@ function ExpensesV2() {
       const file = e.target.files[0];
       if (!file) return;
 
+      setIsLoading(true);
+      setLoadingMessage('Reading Excel file...');
+
       try {
         const importedCategories = await importExpensesFromExcel(file);
+
+        setIsLoading(false);
+        setLoadingMessage('');
 
         const confirmed = await showConfirm({
           title: 'Import Expenses',
@@ -251,6 +260,9 @@ function ExpensesV2() {
           return;
         }
 
+        setIsLoading(true);
+        setLoadingMessage('Importing expense categories...');
+
         // Replace all categories
         profile.expenseCategories = importedCategories;
         useStore.getState().saveProfile();
@@ -259,6 +271,9 @@ function ExpensesV2() {
         window.location.reload(); // Reload to reflect changes
       } catch (error) {
         toast.error(`Import failed: ${error.message}`);
+      } finally {
+        setIsLoading(false);
+        setLoadingMessage('');
       }
     };
     input.click();
@@ -285,8 +300,9 @@ function ExpensesV2() {
   };
 
   return (
-    <div className="expenses">
+    <div className="expenses" style={{ position: 'relative' }}>
       {confirmDialog}
+      {isLoading && <LoadingSpinner variant="overlay" message={loadingMessage} />}
 
       <div className="expenses-header">
         <h2>Expense Management</h2>

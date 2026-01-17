@@ -482,6 +482,9 @@ export const convertAndFormat = (amount, fromCurrency, settings, decimals = 0) =
  * Format percentage
  */
 export const formatPercentage = (value, decimals = 1) => {
+  if (value === undefined || value === null || isNaN(value)) {
+    return '—';
+  }
   return `${value.toFixed(decimals)}%`;
 };
 
