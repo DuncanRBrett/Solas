@@ -4,6 +4,7 @@ import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
 import {
   createDefaultIncome,
+  createDefaultAnnuity,
   DEFAULT_ENABLED_CURRENCIES,
   getCurrencySymbol,
 } from '../../models/defaults';
@@ -17,7 +18,23 @@ import {
 import './Income.css';
 
 // Income types
-const INCOME_TYPES = ['Work', 'Investment', 'Pension', 'Rental', 'Other'];
+const INCOME_TYPES = ['Work', 'Investment', 'Pension', 'Rental', 'Annuity', 'Other'];
+
+// Annuity types
+const ANNUITY_TYPES = [
+  { value: 'living', label: 'Living Annuity' },
+  { value: 'life', label: 'Life Annuity' },
+];
+
+// Calculate drawdown rate for living annuity
+const calculateDrawdownRate = (monthlyAmount, capitalValue) => {
+  if (!capitalValue || capitalValue <= 0) return 0;
+  const annualDrawdown = monthlyAmount * 12;
+  return (annualDrawdown / capitalValue) * 100;
+};
+
+// Check if drawdown rate is valid (2.5% - 17.5%)
+const isValidDrawdownRate = (rate) => rate >= 2.5 && rate <= 17.5;
 
 function Income() {
   const { profile, addIncome, updateIncome, deleteIncome } = useStore();
@@ -161,7 +178,28 @@ function Income() {
   };
 
   const handleChange = (field, value) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((prev) => {
+      const updated = { ...prev, [field]: value };
+
+      // When switching to Annuity type, initialize annuity fields
+      if (field === 'type' && value === 'Annuity' && !prev.annuityType) {
+        updated.annuityType = 'living';
+        updated.capitalValue = 0;
+        updated.escalationRate = 5;
+        updated.isInflationAdjusted = false; // Annuities use escalation rate
+      }
+
+      // When switching away from Annuity type, clear annuity fields
+      if (field === 'type' && value !== 'Annuity') {
+        updated.annuityType = null;
+        updated.capitalValue = null;
+        updated.escalationRate = null;
+        updated.guaranteedPeriod = null;
+        updated.provider = '';
+      }
+
+      return updated;
+    });
   };
 
   // Determine income status based on age
@@ -280,6 +318,97 @@ function Income() {
               </select>
             </div>
 
+            {/* Annuity-specific fields */}
+            {formData.type === 'Annuity' && (
+              <>
+                <div className="form-group">
+                  <label>Annuity Type *</label>
+                  <select
+                    value={formData.annuityType || 'living'}
+                    onChange={(e) => handleChange('annuityType', e.target.value)}
+                  >
+                    {ANNUITY_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    {formData.annuityType === 'living'
+                      ? 'You own the capital, choose drawdown rate'
+                      : 'Insurer owns capital, guaranteed income for life'}
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label>Capital Value *</label>
+                  <input
+                    type="number"
+                    step="10000"
+                    value={formData.capitalValue || ''}
+                    onChange={(e) => handleChange('capitalValue', parseFloat(e.target.value) || 0)}
+                    placeholder="Current capital value"
+                  />
+                  <small>
+                    {formData.annuityType === 'living'
+                      ? 'Current capital in the annuity'
+                      : 'Purchase price paid for the annuity'}
+                  </small>
+                </div>
+
+                {/* Drawdown rate display for living annuity */}
+                {formData.annuityType === 'living' && formData.capitalValue > 0 && (
+                  <div className="form-group">
+                    <label>Drawdown Rate</label>
+                    <div className={`drawdown-display ${!isValidDrawdownRate(calculateDrawdownRate(formData.monthlyAmount, formData.capitalValue)) ? 'invalid' : 'valid'}`}>
+                      {calculateDrawdownRate(formData.monthlyAmount, formData.capitalValue).toFixed(2)}%
+                    </div>
+                    <small className={!isValidDrawdownRate(calculateDrawdownRate(formData.monthlyAmount, formData.capitalValue)) ? 'error-text' : ''}>
+                      Must be between 2.5% and 17.5% (SARS requirement)
+                    </small>
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label>Escalation Rate (% p.a.)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="20"
+                    value={formData.escalationRate ?? 5}
+                    onChange={(e) => handleChange('escalationRate', parseFloat(e.target.value) || 0)}
+                  />
+                  <small>Annual increase in income (e.g., 5% or CPI-linked)</small>
+                </div>
+
+                <div className="form-group">
+                  <label>Provider</label>
+                  <input
+                    type="text"
+                    value={formData.provider || ''}
+                    onChange={(e) => handleChange('provider', e.target.value)}
+                    placeholder="e.g., Allan Gray, Coronation"
+                  />
+                </div>
+
+                {formData.annuityType === 'life' && (
+                  <div className="form-group">
+                    <label>Guaranteed Period (years)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="30"
+                      value={formData.guaranteedPeriod || ''}
+                      onChange={(e) => handleChange('guaranteedPeriod', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="Optional"
+                    />
+                    <small>Years of guaranteed payment to beneficiaries (informational)</small>
+                  </div>
+                )}
+              </>
+            )}
+
             <div className="form-group">
               <label>Start Age</label>
               <input
@@ -314,17 +443,20 @@ function Income() {
               <small>Is this income subject to income tax?</small>
             </div>
 
-            <div className="form-group checkbox-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={formData.isInflationAdjusted}
-                  onChange={(e) => handleChange('isInflationAdjusted', e.target.checked)}
-                />
-                Inflation Adjusted
-              </label>
-              <small>Does this income grow with inflation?</small>
-            </div>
+            {/* Hide inflation adjusted for annuities - they use escalation rate */}
+            {formData.type !== 'Annuity' && (
+              <div className="form-group checkbox-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={formData.isInflationAdjusted}
+                    onChange={(e) => handleChange('isInflationAdjusted', e.target.checked)}
+                  />
+                  Inflation Adjusted
+                </label>
+                <small>Does this income grow with inflation?</small>
+              </div>
+            )}
 
             <div className="form-group full-width">
               <label>Notes</label>
@@ -378,26 +510,49 @@ function Income() {
                 const status = getIncomeStatus(item);
                 const monthly = toReporting(item.monthlyAmount, item.currency);
                 const annual = monthly * 12;
+                const isAnnuity = item.type === 'Annuity';
+                const drawdownRate = isAnnuity && item.annuityType === 'living' && item.capitalValue > 0
+                  ? calculateDrawdownRate(item.monthlyAmount, item.capitalValue)
+                  : null;
 
                 return (
                   <tr key={item.id} className={status === 'ended' ? 'ended-row' : ''}>
-                    <td>{item.name}</td>
+                    <td>
+                      {item.name}
+                      {isAnnuity && item.provider && (
+                        <span className="provider-label"> ({item.provider})</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`badge type-${item.type.toLowerCase()}`}>
                         {item.type}
                       </span>
+                      {isAnnuity && (
+                        <span className={`badge annuity-type-${item.annuityType}`}>
+                          {item.annuityType === 'living' ? 'Living' : 'Life'}
+                        </span>
+                      )}
                     </td>
                     <td>
                       {item.currency !== reportingCurrency && (
                         <span className="currency-badge">{item.currency}</span>
                       )}
                       {fmt(monthly)}
+                      {drawdownRate !== null && (
+                        <span className={`drawdown-badge ${isValidDrawdownRate(drawdownRate) ? 'valid' : 'invalid'}`}>
+                          {drawdownRate.toFixed(1)}%
+                        </span>
+                      )}
                     </td>
                     <td>{fmt(annual)}</td>
                     <td>{item.startAge || 'Now'}</td>
                     <td>{item.endAge || 'Lifetime'}</td>
                     <td>{item.isTaxable ? 'Yes' : 'No'}</td>
-                    <td>{item.isInflationAdjusted ? 'Yes' : 'No'}</td>
+                    <td>
+                      {isAnnuity
+                        ? `${item.escalationRate ?? 0}% esc.`
+                        : (item.isInflationAdjusted ? 'Yes' : 'No')}
+                    </td>
                     <td>
                       <span className={`badge status-${status}`}>
                         {status === 'active' ? 'Active' : status === 'future' ? 'Future' : 'Ended'}

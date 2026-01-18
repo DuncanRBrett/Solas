@@ -22,13 +22,13 @@ function CapitalGainsCard() {
       RA: 0,
     };
 
+    // Track lifestyle asset gains separately
+    let lifestyleGain = 0;
+    let lifestyleValue = 0;
+    let lifestyleCost = 0;
+
     // Calculate gains for each asset
     assets.forEach(asset => {
-      // Only count investible assets
-      if (asset.assetType !== 'Investible') {
-        return;
-      }
-
       const currentValue = calculateAssetValue(asset, settings);
       const costBasis = toReportingCurrency(
         asset.units * asset.costPrice,
@@ -38,6 +38,14 @@ function CapitalGainsCard() {
       );
 
       const gain = currentValue - costBasis;
+
+      // Handle lifestyle (non-investible) assets separately
+      if (asset.assetType !== 'Investible') {
+        lifestyleGain += gain;
+        lifestyleValue += currentValue;
+        lifestyleCost += costBasis;
+        return;
+      }
 
       investibleAssetsValue += currentValue;
       investibleAssetsCost += costBasis;
@@ -88,6 +96,10 @@ function CapitalGainsCard() {
       roi,
       effectiveCGTRate: effectiveCGTRate * 100, // Convert to percentage
       gainsByAccountType,
+      // Lifestyle asset gains
+      lifestyleGain,
+      lifestyleValue,
+      lifestyleCost,
     };
   }, [assets, settings, marginalTaxRate]);
 
@@ -186,7 +198,7 @@ function CapitalGainsCard() {
       )}
 
       {/* Account Type Breakdown */}
-      {Object.values(gainsData.gainsByAccountType).some(v => v !== 0) && (
+      {(Object.values(gainsData.gainsByAccountType).some(v => v !== 0) || gainsData.lifestyleGain !== 0) && (
         <div className="account-breakdown">
           <h4>Gains by Account Type</h4>
           <div className="account-list">
@@ -202,6 +214,14 @@ function CapitalGainsCard() {
                 </div>
               );
             })}
+            {gainsData.lifestyleGain !== 0 && (
+              <div className="account-item lifestyle">
+                <span className="account-type">Lifestyle</span>
+                <span className={`account-gain ${gainsData.lifestyleGain >= 0 ? 'positive' : 'negative'}`}>
+                  {gainsData.lifestyleGain >= 0 ? '+' : ''}{fmt(gainsData.lifestyleGain)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

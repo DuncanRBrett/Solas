@@ -206,6 +206,12 @@ export const LiabilitySchema = z.object({
 // Income Validation
 // =============================================================================
 
+// Valid income types
+const INCOME_TYPES = ['Work', 'Investment', 'Pension', 'Rental', 'Annuity', 'Other'];
+
+// Annuity types
+const ANNUITY_TYPES = ['living', 'life'];
+
 export const IncomeSchema = z.object({
   id: z.string().uuid('Must be a valid UUID'),
 
@@ -213,8 +219,8 @@ export const IncomeSchema = z.object({
     .min(1, 'Income name is required')
     .max(100, 'Income name too long (max 100 characters)'),
 
-  type: z.enum(['Work', 'Investment'], {
-    errorMap: () => ({ message: 'Income type must be "Work" or "Investment"' }),
+  type: z.enum(INCOME_TYPES, {
+    errorMap: () => ({ message: `Income type must be one of: ${INCOME_TYPES.join(', ')}` }),
   }),
 
   monthlyAmount: PositiveNumberSchema.refine(
@@ -247,6 +253,37 @@ export const IncomeSchema = z.object({
     .max(1000, 'Notes too long (max 1000 characters)')
     .optional()
     .default(''),
+
+  // Annuity-specific fields (only used when type === 'Annuity')
+  annuityType: z.enum(ANNUITY_TYPES).nullable().optional().default(null),
+
+  capitalValue: z.number()
+    .min(0, 'Capital value cannot be negative')
+    .max(1e12, 'Capital value unreasonably large')
+    .nullable()
+    .optional()
+    .default(null),
+
+  escalationRate: z.number()
+    .min(0, 'Escalation rate cannot be negative')
+    .max(20, 'Escalation rate unreasonably high (max 20%)')
+    .nullable()
+    .optional()
+    .default(null),
+
+  guaranteedPeriod: z.number()
+    .int('Guaranteed period must be a whole number')
+    .min(0, 'Guaranteed period cannot be negative')
+    .max(30, 'Guaranteed period unreasonably long (max 30 years)')
+    .nullable()
+    .optional()
+    .default(null),
+
+  provider: z.string()
+    .max(100, 'Provider name too long (max 100 characters)')
+    .optional()
+    .default(''),
+
 }).refine(
   data => {
     // If both ages are set, endAge must be >= startAge
@@ -258,6 +295,46 @@ export const IncomeSchema = z.object({
   {
     message: 'End age must be greater than or equal to start age',
     path: ['endAge'],
+  }
+).refine(
+  data => {
+    // If type is Annuity, annuityType is required
+    if (data.type === 'Annuity' && !data.annuityType) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: 'Annuity type (living or life) is required for annuities',
+    path: ['annuityType'],
+  }
+).refine(
+  data => {
+    // If type is Annuity, capitalValue is required and must be positive
+    if (data.type === 'Annuity' && (!data.capitalValue || data.capitalValue <= 0)) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: 'Capital value is required for annuities',
+    path: ['capitalValue'],
+  }
+).refine(
+  data => {
+    // Living annuity drawdown rate must be between 2.5% and 17.5%
+    if (data.type === 'Annuity' && data.annuityType === 'living' && data.capitalValue > 0) {
+      const annualDrawdown = data.monthlyAmount * 12;
+      const drawdownRate = (annualDrawdown / data.capitalValue) * 100;
+      if (drawdownRate < 2.5 || drawdownRate > 17.5) {
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Living annuity drawdown rate must be between 2.5% and 17.5% of capital',
+    path: ['monthlyAmount'],
   }
 );
 

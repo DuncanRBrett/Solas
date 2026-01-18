@@ -100,6 +100,7 @@ export const calculateInterestIncomeFromAssets = (assets, exchangeRates, margina
 
 /**
  * Calculate income at a given age from all sources
+ * Handles both regular income (inflation-adjusted) and annuities (escalation rate)
  */
 export const calculateIncomeAtAge = (age, incomeSources, exchangeRates, inflationRate, yearsFromNow) => {
   let totalIncome = 0;
@@ -112,8 +113,12 @@ export const calculateIncomeAtAge = (age, incomeSources, exchangeRates, inflatio
     if (isActive) {
       let monthlyAmount = toZAR(source.monthlyAmount, source.currency, exchangeRates);
 
-      // Apply inflation adjustment if applicable
-      if (source.isInflationAdjusted && yearsFromNow > 0) {
+      // For annuities, use the escalation rate instead of inflation
+      if (source.type === 'Annuity' && source.escalationRate != null && yearsFromNow > 0) {
+        monthlyAmount = monthlyAmount * Math.pow(1 + source.escalationRate / 100, yearsFromNow);
+      }
+      // For regular income, apply inflation adjustment if applicable
+      else if (source.isInflationAdjusted && yearsFromNow > 0) {
         monthlyAmount = monthlyAmount * Math.pow(1 + inflationRate / 100, yearsFromNow);
       }
 

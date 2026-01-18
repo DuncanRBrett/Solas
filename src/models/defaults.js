@@ -347,7 +347,7 @@ export const createDefaultLiability = () => ({
 export const createDefaultIncome = () => ({
   id: crypto.randomUUID(),
   name: '',
-  type: 'Work', // Work, Investment
+  type: 'Work', // Work, Investment, Pension, Rental, Annuity, Other
   monthlyAmount: 0,
   currency: 'ZAR',
   startAge: null,
@@ -355,6 +355,25 @@ export const createDefaultIncome = () => ({
   isTaxable: true,
   isInflationAdjusted: true,
   notes: '',
+  // Annuity-specific fields (only used when type === 'Annuity')
+  annuityType: null, // 'living' or 'life'
+  capitalValue: null, // Current capital (living) or purchase price (life)
+  escalationRate: null, // % annual increase
+  guaranteedPeriod: null, // Years (life annuity only), informational
+  provider: '', // e.g., Allan Gray, Coronation
+});
+
+// Helper to create a new annuity with sensible defaults
+export const createDefaultAnnuity = () => ({
+  ...createDefaultIncome(),
+  type: 'Annuity',
+  isTaxable: true,
+  isInflationAdjusted: false, // Annuities use escalationRate instead
+  annuityType: 'living',
+  capitalValue: 0,
+  escalationRate: 5, // 5% default escalation
+  guaranteedPeriod: null,
+  provider: '',
 });
 
 // New hierarchical expense structure

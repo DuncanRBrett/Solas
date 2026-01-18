@@ -243,6 +243,15 @@
   color: #dc2626;
 }
 
+.account-item.lifestyle {
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+}
+
+.account-item.lifestyle .account-type {
+  color: #6d28d9;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .capital-gains-card {
