@@ -27,6 +27,11 @@ const useStore = create((set, get) => ({
   // Current profile data
   profile: null,
 
+  // Error state for initialization/loading issues
+  // Components should check this and display appropriate toast/message
+  initError: null,
+  clearInitError: () => set({ initError: null }),
+
   // Initialize from localStorage
   init: () => {
     const profilesJson = localStorage.getItem('solas_profiles');
@@ -82,48 +87,52 @@ const useStore = create((set, get) => ({
           profiles,
           currentProfileName: firstProfileName,
           profile: defaultProfile,
+          initError: 'Profile data was corrupted and could not be loaded. A new profile has been created. You may be able to restore from a backup.',
         });
-
-        alert('Profile data was corrupted and could not be loaded. A new profile has been created. You may be able to restore from a backup.');
       }
     }
   },
 
   // Switch profile
+  // Returns { success: true } or { success: false, error: string }
   switchProfile: (profileName) => {
     const profileDataStr = localStorage.getItem(`solas_profile_${profileName}`);
 
-    if (profileDataStr) {
-      const result = loadProfile(profileDataStr);
+    if (!profileDataStr) {
+      return { success: false, error: `Profile "${profileName}" not found` };
+    }
 
-      if (result.success) {
-        // Save migrated profile back if it was migrated
-        if (result.migrated) {
-          localStorage.setItem(
-            `solas_profile_${profileName}`,
-            JSON.stringify(result.profile)
-          );
-          createBackup(profileName, result.profile);
-        }
+    const result = loadProfile(profileDataStr);
 
-        set({
-          currentProfileName: profileName,
-          profile: result.profile,
-        });
-      } else {
-        console.error('Failed to switch to profile:', result.error);
-        alert(`Failed to load profile "${profileName}": ${result.error}`);
+    if (result.success) {
+      // Save migrated profile back if it was migrated
+      if (result.migrated) {
+        localStorage.setItem(
+          `solas_profile_${profileName}`,
+          JSON.stringify(result.profile)
+        );
+        createBackup(profileName, result.profile);
       }
+
+      set({
+        currentProfileName: profileName,
+        profile: result.profile,
+      });
+
+      return { success: true };
+    } else {
+      console.error('Failed to switch to profile:', result.error);
+      return { success: false, error: `Failed to load profile "${profileName}": ${result.error}` };
     }
   },
 
   // Create new profile
+  // Returns { success: true } or { success: false, error: string }
   createProfile: (profileName) => {
     const { profiles } = get();
 
     if (profiles.includes(profileName)) {
-      alert('Profile already exists');
-      return false;
+      return { success: false, error: 'Profile already exists' };
     }
 
     const newProfile = createDefaultProfile(profileName);
@@ -139,20 +148,17 @@ const useStore = create((set, get) => ({
       profile: newProfile,
     });
 
-    return true;
+    return { success: true };
   },
 
   // Delete profile
+  // Note: Caller should show confirmation dialog BEFORE calling this
+  // Returns { success: true } or { success: false, error: string }
   deleteProfile: (profileName) => {
     const { profiles, currentProfileName } = get();
 
     if (profiles.length === 1) {
-      alert('Cannot delete the only profile');
-      return false;
-    }
-
-    if (!confirm(`Are you sure you want to delete profile "${profileName}"?`)) {
-      return false;
+      return { success: false, error: 'Cannot delete the only profile' };
     }
 
     // Remove from localStorage
@@ -177,16 +183,16 @@ const useStore = create((set, get) => ({
       set({ profiles: updatedProfiles });
     }
 
-    return true;
+    return { success: true };
   },
 
   // Rename profile
+  // Returns { success: true } or { success: false, error: string }
   renameProfile: (oldName, newName) => {
     const { profiles, currentProfileName } = get();
 
     if (profiles.includes(newName)) {
-      alert('Profile with that name already exists');
-      return false;
+      return { success: false, error: 'Profile with that name already exists' };
     }
 
     // Get profile data
@@ -208,7 +214,7 @@ const useStore = create((set, get) => ({
       profile: currentProfileName === oldName ? profileData : get().profile,
     });
 
-    return true;
+    return { success: true };
   },
 
   // Save current profile to localStorage (IMMEDIATE - no debouncing)

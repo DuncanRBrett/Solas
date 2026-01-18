@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
 import Dashboard from './components/Dashboard/Dashboard';
 import Assets from './components/Assets/Assets';
@@ -12,6 +12,8 @@ import Rebalancing from './components/Rebalancing/Rebalancing';
 import Fees from './components/Fees/Fees';
 import Settings from './components/Settings/Settings';
 import KeyboardShortcutsHelp from './components/shared/KeyboardShortcutsHelp';
+import { ConfirmDialog } from './components/shared/ConfirmDialog';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import './App.css';
 
@@ -21,11 +23,12 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 function App() {
-  const { init, profile, profiles, currentProfileName, switchProfile, createProfile, deleteProfile } = useStore();
+  const { init, profile, profiles, currentProfileName, switchProfile, createProfile, deleteProfile, initError, clearInitError } = useStore();
   const [currentView, setCurrentView] = useState('dashboard');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({ show: false, profileName: null });
   const { registerShortcut, unregisterShortcut } = useKeyboardShortcuts();
 
   // Initialize on mount
@@ -35,9 +38,17 @@ function App() {
     // Expose store to window in development for testing/debugging
     if (process.env.NODE_ENV === 'development') {
       window.__SOLAS_STORE__ = useStore;
-      console.log('🔧 Dev mode: Store exposed as window.__SOLAS_STORE__');
+      console.log('Dev mode: Store exposed as window.__SOLAS_STORE__');
     }
   }, [init]);
+
+  // Handle initialization errors
+  useEffect(() => {
+    if (initError) {
+      toast.error(initError, { duration: 8000 });
+      clearInitError();
+    }
+  }, [initError, clearInitError]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -57,16 +68,39 @@ function App() {
 
   const handleCreateProfile = () => {
     if (newProfileName.trim()) {
-      const success = createProfile(newProfileName.trim());
-      if (success) {
+      const result = createProfile(newProfileName.trim());
+      if (result.success) {
         setNewProfileName('');
         setShowProfileMenu(false);
+        toast.success(`Profile "${newProfileName.trim()}" created`);
+      } else {
+        toast.error(result.error);
       }
     }
   };
 
   const handleDeleteProfile = (profileName) => {
-    deleteProfile(profileName);
+    // Show confirmation dialog instead of using browser confirm
+    setDeleteConfirm({ show: true, profileName });
+  };
+
+  const confirmDeleteProfile = () => {
+    const { profileName } = deleteConfirm;
+    const result = deleteProfile(profileName);
+    if (result.success) {
+      toast.success(`Profile "${profileName}" deleted`);
+    } else {
+      toast.error(result.error);
+    }
+    setDeleteConfirm({ show: false, profileName: null });
+    setShowProfileMenu(false);
+  };
+
+  const handleSwitchProfile = (profileName) => {
+    const result = switchProfile(profileName);
+    if (!result.success) {
+      toast.error(result.error);
+    }
     setShowProfileMenu(false);
   };
 
@@ -148,10 +182,7 @@ function App() {
                   <div key={p} className="profile-menu-item">
                     <button
                       className={p === currentProfileName ? 'active' : ''}
-                      onClick={() => {
-                        switchProfile(p);
-                        setShowProfileMenu(false);
-                      }}
+                      onClick={() => handleSwitchProfile(p)}
                     >
                       {p}
                     </button>
@@ -251,7 +282,9 @@ function App() {
 
       {/* Main Content */}
       <main className="app-main">
-        {renderView()}
+        <ErrorBoundary>
+          {renderView()}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}
@@ -266,6 +299,18 @@ function App() {
 
     {/* Keyboard Shortcuts Help Modal */}
     {showKeyboardHelp && <KeyboardShortcutsHelp onClose={() => setShowKeyboardHelp(false)} />}
+
+    {/* Delete Profile Confirmation Dialog */}
+    <ConfirmDialog
+      isOpen={deleteConfirm.show}
+      title="Delete Profile"
+      message={`Are you sure you want to delete profile "${deleteConfirm.profileName}"? This action cannot be undone.`}
+      confirmText="Delete"
+      cancelText="Cancel"
+      onConfirm={confirmDeleteProfile}
+      onCancel={() => setDeleteConfirm({ show: false, profileName: null })}
+      variant="danger"
+    />
     </>
   );
 }

@@ -37,7 +37,7 @@ ChartJS.register(
 
 function Scenarios() {
   const { profile, addScenario, updateScenario, deleteScenario } = useStore();
-  const reportingCurrency = profile.settings.reportingCurrency || 'ZAR';
+  const reportingCurrency = profile?.settings?.reportingCurrency || 'ZAR';
   const [isAdding, setIsAdding] = useState(false);
   const [editingScenario, setEditingScenario] = useState(null);
   const [selectedScenario, setSelectedScenario] = useState(null);

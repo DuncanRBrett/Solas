@@ -17,17 +17,17 @@ function Dashboard() {
   const { profile } = useStore();
 
   const stats = useMemo(() => {
-    const { assets, liabilities, settings } = profile;
-    const reportingCurrency = settings.reportingCurrency || 'ZAR';
+    const { assets = [], liabilities = [], settings } = profile || {};
+    const reportingCurrency = settings?.reportingCurrency || 'ZAR';
     const exchangeRates = getExchangeRates(settings);
 
     // Provide defaults if withdrawalRates doesn't exist
-    const withdrawalRates = settings.withdrawalRates || {
+    const withdrawalRates = settings?.withdrawalRates || {
       conservative: 3.0,
       safe: 4.0,
       aggressive: 5.0,
     };
-    const { annualExpenses } = settings.profile;
+    const { annualExpenses = 0 } = settings?.profile || {};
 
     // Helper for formatting in reporting currency
     const fmt = (amount, decimals = 0) => formatInReportingCurrency(amount, decimals, reportingCurrency);

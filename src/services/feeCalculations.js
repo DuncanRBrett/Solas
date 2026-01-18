@@ -515,17 +515,16 @@ export function calculateScenarioYearFees(portfolioValue, settings) {
         break;
 
       case 'tiered-percentage': {
-        // For scenario projections, use a weighted average approximation
-        // This assumes portfolio is distributed across tiers
+        // Tiered percentage fee calculation
+        // Each tier's upTo is cumulative (e.g., 500k, 2M, Infinity)
+        // Fee is calculated on the amount within each tier
         if (fs.tiers && fs.tiers.length > 0) {
           let fee = 0;
           let remaining = portfolioValue;
 
           for (const tier of fs.tiers) {
-            const prevLimit = fs.tiers.indexOf(tier) > 0
-              ? fs.tiers[fs.tiers.indexOf(tier) - 1].upTo
-              : 0;
-            const tierAmount = Math.min(remaining, tier.upTo - prevLimit);
+            // Calculate how much of the portfolio falls in this tier
+            const tierAmount = Math.min(remaining, tier.upTo);
             fee += tierAmount * (tier.rate / 100);
             remaining -= tierAmount;
 

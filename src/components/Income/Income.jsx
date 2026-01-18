@@ -27,12 +27,12 @@ function Income() {
   const [showDividendIncome, setShowDividendIncome] = useState(false);
   const { confirmDialog, showConfirm } = useConfirmDialog();
 
-  const { income, assets, settings } = profile;
-  const reportingCurrency = settings.reportingCurrency || 'ZAR';
+  const { income, assets, settings } = profile || {};
+  const reportingCurrency = settings?.reportingCurrency || 'ZAR';
   const exchangeRates = getExchangeRates(settings);
-  const enabledCurrencies = settings.enabledCurrencies || DEFAULT_ENABLED_CURRENCIES;
-  const currentAge = settings.profile.age;
-  const marginalTaxRate = settings.profile.marginalTaxRate || 39;
+  const enabledCurrencies = settings?.enabledCurrencies || DEFAULT_ENABLED_CURRENCIES;
+  const currentAge = settings?.profile?.age;
+  const marginalTaxRate = settings?.profile?.marginalTaxRate || 39;
 
   // Helper to convert to reporting currency
   const toReporting = (amount, currency) =>

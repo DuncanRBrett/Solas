@@ -30,20 +30,23 @@ function Settings() {
   const { confirmDialog, showConfirm } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState('general'); // 'general' or 'fees'
 
+  // Safety check for missing profile data
+  const profileSettings = profile?.settings || DEFAULT_SETTINGS;
+
   // Migrate legacy exchange rates if needed
-  const migratedExchangeRates = profile.settings.exchangeRates && !profile.settings.exchangeRates['USD/ZAR']
-    ? profile.settings.exchangeRates
-    : profile.settings.currency?.exchangeRates
-      ? migrateLegacyExchangeRates(profile.settings.currency.exchangeRates, profile.settings.reportingCurrency || 'ZAR')
+  const migratedExchangeRates = profileSettings.exchangeRates && !profileSettings.exchangeRates['USD/ZAR']
+    ? profileSettings.exchangeRates
+    : profileSettings.currency?.exchangeRates
+      ? migrateLegacyExchangeRates(profileSettings.currency.exchangeRates, profileSettings.reportingCurrency || 'ZAR')
       : DEFAULT_EXCHANGE_RATES;
 
   const [settings, setSettings] = useState({
-    ...profile.settings,
+    ...profileSettings,
     profile: {
       ...DEFAULT_SETTINGS.profile,
-      ...profile.settings.profile,
+      ...profileSettings.profile,
     },
-    withdrawalRates: profile.settings.withdrawalRates || {
+    withdrawalRates: profileSettings.withdrawalRates || {
       conservative: 3.0,
       safe: 4.0,
       aggressive: 5.0,

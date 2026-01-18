@@ -246,6 +246,11 @@ export const calculateWithdrawalCGT = (withdrawalAmount, assets, exchangeRates, 
   // Total tax on the withdrawal
   const totalTax = cgt + raTax;
 
+  // Calculate grossForNet with divide-by-zero protection
+  // If totalTax equals withdrawalAmount (100% tax), grossForNet would be infinite
+  const taxRatio = withdrawalAmount > 0 ? totalTax / withdrawalAmount : 0;
+  const grossForNet = taxRatio >= 1 ? withdrawalAmount * 2 : withdrawalAmount / (1 - taxRatio);
+
   return {
     cgt,                                    // CGT specifically (Taxable accounts)
     raTax,                                  // Income tax on RA withdrawal
@@ -253,7 +258,7 @@ export const calculateWithdrawalCGT = (withdrawalAmount, assets, exchangeRates, 
     grossWithdrawal: withdrawalAmount,      // What you withdraw
     netWithdrawal: withdrawalAmount - totalTax,  // What you keep after tax
     // For reverse calculation: how much gross to withdraw to get net amount
-    grossForNet: withdrawalAmount / (1 - (totalTax / withdrawalAmount || 0)),
+    grossForNet,
     taxableGainRatio,                       // Proportion of taxable that is gain
     accountMix: {
       tfsa: tfsaValue / totalValue,
@@ -309,10 +314,11 @@ export const calculateAccountTypeWeights = (assets, exchangeRates) => {
  * Used to estimate CGT more accurately (CGT only applies to gains, not entire withdrawal)
  *
  * @param {Array} assets - Array of asset objects
- * @param {object} exchangeRates - Exchange rates for currency conversion
+ * @param {object} exchangeRates - Exchange rates in legacy format (e.g., { 'USD/ZAR': 18.50 })
+ * @param {string} reportingCurrency - The reporting currency (default 'ZAR')
  * @returns {object} { gainRatio, totalValue, totalCost, totalGain }
  */
-export const calculateTaxablePortfolioGainRatio = (assets, exchangeRates) => {
+export const calculateTaxablePortfolioGainRatio = (assets, exchangeRates, reportingCurrency = 'ZAR') => {
   let totalValue = 0;
   let totalCost = 0;
 
@@ -320,7 +326,10 @@ export const calculateTaxablePortfolioGainRatio = (assets, exchangeRates) => {
     // Only include investible assets in taxable accounts (not TFSA or RA)
     if (asset.assetType === 'Investible' && asset.accountType !== 'TFSA' && asset.accountType !== 'RA') {
       const value = calculateAssetValueZAR(asset, exchangeRates);
-      const cost = (asset.units || 0) * (asset.costPrice || 0) * (exchangeRates[`${asset.currency}/ZAR`] || 1);
+      // Use the same exchange rate lookup pattern as toZAR for consistency
+      const rateKey = `${asset.currency}/${reportingCurrency}`;
+      const rate = asset.currency === reportingCurrency ? 1 : (exchangeRates[rateKey] || 1);
+      const cost = (asset.units || 0) * (asset.costPrice || 0) * rate;
 
       totalValue += value;
       totalCost += cost;
@@ -474,7 +483,29 @@ export const calculateAssetClassPercentages = (assets, exchangeRates) => {
  * Run a retirement scenario projection
  */
 export const runScenario = (scenario, profile) => {
-  const { assets, income, expenses, settings, expenseCategories = [], ageBasedExpensePlan } = profile;
+  const { assets, income, expenses, settings, expenseCategories = [], ageBasedExpensePlan } = profile || {};
+
+  // Safety check for missing data
+  if (!settings || !settings.profile) {
+    console.error('runScenario: Missing settings or profile data');
+    return {
+      trajectory: [],
+      success: false,
+      depletionAge: null,
+      finalValue: 0,
+      shortfall: 0,
+      totalWithdrawn: 0,
+      totalWithdrawalTax: 0,
+      totalIncome: 0,
+      totalExpenses: 0,
+      totalFeesPaid: 0,
+      expenseCoverageBreakdown: { byIncome: { amount: 0, percentage: 0 }, byReturns: { amount: 0, percentage: 0 }, byCapitalDrawdown: { amount: 0, percentage: 0 } },
+      metrics: {},
+      runAt: new Date().toISOString(),
+      error: 'Missing required profile data',
+    };
+  }
+
   // Use legacy format for backward compatibility with existing calculations
   const exchangeRates = toLegacyExchangeRates(settings);
   const { age: currentAge, marginalTaxRate, defaultCGT } = settings.profile;
@@ -559,7 +590,8 @@ export const runScenario = (scenario, profile) => {
 
   // Calculate portfolio gain ratio for more accurate CGT estimation
   // CGT only applies to the gain portion of taxable account withdrawals
-  const gainRatioData = calculateTaxablePortfolioGainRatio(assets, exchangeRates);
+  const reportingCurrency = settings.reportingCurrency || 'ZAR';
+  const gainRatioData = calculateTaxablePortfolioGainRatio(assets, exchangeRates, reportingCurrency);
   const initialGainRatio = gainRatioData.gainRatio; // Proportion of taxable portfolio that is gain
 
   // CGT rate (40% inclusion × marginal rate) - applied only to gain portion
@@ -978,10 +1010,10 @@ const calculateIncomeForAge = (age, incomeSources, exchangeRates) => {
  * - Shows ending portfolio for each phase
  */
 export const calculateRetirementReadiness = (profile) => {
-  const { assets, income, expenses, expenseCategories, ageBasedExpensePlan, settings } = profile;
+  const { assets, income, expenses, expenseCategories, ageBasedExpensePlan, settings } = profile || {};
 
   // Safety checks for missing data
-  if (!settings || !settings.reportingCurrency) {
+  if (!settings || !settings.reportingCurrency || !settings.profile) {
     return {
       investibleAssets: 0,
       annualExpenses: 0,
@@ -998,6 +1030,7 @@ export const calculateRetirementReadiness = (profile) => {
       retirementAge: 65,
       lifeExpectancy: 95,
       inflationRate: 4.5,
+      error: 'Missing required profile data',
     };
   }
 
@@ -1094,7 +1127,8 @@ export const calculateRetirementReadiness = (profile) => {
 
   // Calculate portfolio gain ratio and account type weights for CGT estimation
   // CGT only applies to the gain portion of taxable account withdrawals
-  const gainRatioData = calculateTaxablePortfolioGainRatio(assets || [], exchangeRates);
+  const reportingCurrency = settings.reportingCurrency || 'ZAR';
+  const gainRatioData = calculateTaxablePortfolioGainRatio(assets || [], exchangeRates, reportingCurrency);
   const gainRatio = gainRatioData.gainRatio; // Proportion of taxable portfolio that is gain
   const accountTypeWeights = calculateAccountTypeWeights(assets || [], exchangeRates);
 
