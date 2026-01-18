@@ -13,6 +13,7 @@ import {
   validateData,
   formatValidationErrors,
 } from '../models/validation';
+import { createHistorySlice } from './historySlice';
 
 // Create debounced save function (saves 1 second after last change)
 // This prevents excessive localStorage writes when user is actively editing
@@ -680,6 +681,9 @@ const useStore = create((set, get) => ({
     }));
     get().saveProfile();
   },
+
+  // History management (from historySlice)
+  ...createHistorySlice(set, get),
 }));
 
 export default useStore;

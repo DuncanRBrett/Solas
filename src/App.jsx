@@ -10,6 +10,7 @@ import RetirementPrep from './components/RetirementPrep/RetirementPrep';
 import Scenarios from './components/Scenarios/Scenarios';
 import Rebalancing from './components/Rebalancing/Rebalancing';
 import Fees from './components/Fees/Fees';
+import History from './components/History/History';
 import Settings from './components/Settings/Settings';
 import KeyboardShortcutsHelp from './components/shared/KeyboardShortcutsHelp';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
@@ -124,6 +125,8 @@ function App() {
         return <Rebalancing />;
       case 'fees':
         return <Fees />;
+      case 'history':
+        return <History />;
       case 'settings':
         return <Settings />;
       default:
@@ -271,6 +274,12 @@ function App() {
           onClick={() => setCurrentView('fees')}
         >
           Fees
+        </button>
+        <button
+          className={currentView === 'history' ? 'active' : ''}
+          onClick={() => setCurrentView('history')}
+        >
+          History
         </button>
         <button
           className={currentView === 'settings' ? 'active' : ''}

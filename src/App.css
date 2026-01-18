@@ -305,6 +305,21 @@ body {
   color: #dc2626;
 }
 
+/* Small danger button - keeps btn-small sizing with danger colors */
+.btn-small.btn-danger {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: #ffffff;
+  background-color: #ef4444;
+  border: 1px solid #ef4444;
+}
+
+.btn-small.btn-danger:hover {
+  background-color: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
 .btn-warning {
   color: #f59e0b;
   background-color: #ffffff;

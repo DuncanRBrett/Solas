@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import {
   calculateAssetValue,
@@ -7,6 +8,7 @@ import {
   detectConcentrationRisks,
   getExchangeRates,
   toReportingCurrency,
+  calculateAllocation,
 } from '../../utils/calculations';
 import AllocationCharts from './AllocationCharts';
 import PortfolioQualityCard from './PortfolioQualityCard';
@@ -14,7 +16,7 @@ import CapitalGainsCard from './CapitalGainsCard';
 import './Dashboard.css';
 
 function Dashboard() {
-  const { profile } = useStore();
+  const { profile, addSnapshot } = useStore();
 
   const stats = useMemo(() => {
     const { assets = [], liabilities = [], settings } = profile || {};
@@ -131,9 +133,56 @@ function Dashboard() {
     };
   }, [profile]);
 
+  // Save current stats to history
+  const handleSaveToHistory = () => {
+    const { assets = [], settings } = profile || {};
+    const reportingCurrency = settings?.reportingCurrency || 'ZAR';
+    const exchangeRates = getExchangeRates(settings);
+
+    // Build legacy exchange rates format for calculateAllocation
+    const legacyExchangeRates = {};
+    Object.entries(exchangeRates).forEach(([currency, rate]) => {
+      if (currency !== reportingCurrency) {
+        legacyExchangeRates[`${currency}/${reportingCurrency}`] = rate;
+      }
+    });
+
+    // Calculate allocation using same method as Dashboard chart (ALL assets, not just investible)
+    const allocationData = calculateAllocation(assets, legacyExchangeRates, 'assetClass');
+    const allocation = {};
+    allocationData.forEach(item => {
+      if (item.name && item.percentage > 0) {
+        allocation[item.name] = item.percentage;
+      }
+    });
+
+    const snapshotData = {
+      netWorth: stats.netWorth,
+      grossAssets: stats.grossAssets,
+      investibleAssets: stats.investibleAssets,
+      nonInvestibleAssets: stats.nonInvestibleAssets,
+      liabilities: stats.totalLiabilities,
+      cgtLiability: stats.totalCGT,
+      realisableNetWorth: stats.realisableNetWorth,
+      allocation,
+    };
+
+    const result = addSnapshot(snapshotData);
+    if (result.success) {
+      toast.success('Snapshot saved to history');
+    } else {
+      toast.error('Failed to save snapshot');
+    }
+  };
+
   return (
     <div className="dashboard">
-      <h2>Dashboard - {profile.name}</h2>
+      <div className="dashboard-header">
+        <h2>Dashboard - {profile.name}</h2>
+        <button className="btn btn-save-history" onClick={handleSaveToHistory}>
+          Save to History
+        </button>
+      </div>
 
       {/* Top Stats Row - Comprehensive Net Worth Overview */}
       <div className="stats-row">
