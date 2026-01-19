@@ -71,6 +71,14 @@ export function calculateIncomeTax(taxableIncome, age, taxConfig = DEFAULT_SETTI
 
       if (taxableIncome <= maxInBracket) {
         // Income falls within this bracket
+        // Tax = base amount for bracket + (income above previous bracket max × marginal rate)
+        //
+        // The +1 is intentional: bracket.min is the first rand IN this bracket (e.g., R237,101),
+        // but baseAmount is tax on income UP TO previous bracket max (e.g., R237,100).
+        // So for income of R300,000 in bracket with min=237101:
+        //   Tax = 42678 + (300000 - 237101 + 1) × 26%
+        //       = 42678 + (300000 - 237100) × 26%
+        //       = 42678 + 62900 × 0.26 = R59,032
         grossTax = bracket.baseAmount + ((taxableIncome - bracket.min + 1) * bracket.rate / 100);
         marginalRate = bracket.rate;
         break;

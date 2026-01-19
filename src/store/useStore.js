@@ -12,6 +12,8 @@ import {
   ScenarioSchema,
   validateData,
   formatValidationErrors,
+  validateAssetPlatform,
+  validateExpenseCategoryUniqueness,
 } from '../models/validation';
 import { createHistorySlice } from './historySlice';
 
@@ -97,6 +99,9 @@ const useStore = create((set, get) => ({
   // Switch profile
   // Returns { success: true } or { success: false, error: string }
   switchProfile: (profileName) => {
+    // Flush any pending saves before switching to avoid data loss
+    get().flushSave();
+
     const profileDataStr = localStorage.getItem(`solas_profile_${profileName}`);
 
     if (!profileDataStr) {
@@ -130,6 +135,9 @@ const useStore = create((set, get) => ({
   // Create new profile
   // Returns { success: true } or { success: false, error: string }
   createProfile: (profileName) => {
+    // Flush any pending saves before creating new profile
+    get().flushSave();
+
     const { profiles } = get();
 
     if (profiles.includes(profileName)) {
@@ -156,6 +164,9 @@ const useStore = create((set, get) => ({
   // Note: Caller should show confirmation dialog BEFORE calling this
   // Returns { success: true } or { success: false, error: string }
   deleteProfile: (profileName) => {
+    // Flush any pending saves before deleting
+    get().flushSave();
+
     const { profiles, currentProfileName } = get();
 
     if (profiles.length === 1) {
@@ -171,9 +182,43 @@ const useStore = create((set, get) => ({
     // If deleting current profile, switch to first available
     if (profileName === currentProfileName) {
       const newCurrentProfile = updatedProfiles[0];
-      const profileData = JSON.parse(
-        localStorage.getItem(`solas_profile_${newCurrentProfile}`)
-      );
+      const profileDataStr = localStorage.getItem(`solas_profile_${newCurrentProfile}`);
+
+      // Handle case where profile data is missing or corrupted
+      if (!profileDataStr) {
+        console.error(`Profile data for "${newCurrentProfile}" not found in localStorage`);
+        // Create a fresh default profile
+        const freshProfile = createDefaultProfile(newCurrentProfile);
+        addVersionToProfile(freshProfile);
+        localStorage.setItem(`solas_profile_${newCurrentProfile}`, JSON.stringify(freshProfile));
+
+        set({
+          profiles: updatedProfiles,
+          currentProfileName: newCurrentProfile,
+          profile: freshProfile,
+          initError: `Profile "${newCurrentProfile}" was corrupted and has been reset.`,
+        });
+        return { success: true };
+      }
+
+      let profileData;
+      try {
+        profileData = JSON.parse(profileDataStr);
+      } catch (parseError) {
+        console.error(`Failed to parse profile "${newCurrentProfile}":`, parseError);
+        // Create a fresh default profile
+        const freshProfile = createDefaultProfile(newCurrentProfile);
+        addVersionToProfile(freshProfile);
+        localStorage.setItem(`solas_profile_${newCurrentProfile}`, JSON.stringify(freshProfile));
+
+        set({
+          profiles: updatedProfiles,
+          currentProfileName: newCurrentProfile,
+          profile: freshProfile,
+          initError: `Profile "${newCurrentProfile}" was corrupted and has been reset.`,
+        });
+        return { success: true };
+      }
 
       set({
         profiles: updatedProfiles,
@@ -190,14 +235,29 @@ const useStore = create((set, get) => ({
   // Rename profile
   // Returns { success: true } or { success: false, error: string }
   renameProfile: (oldName, newName) => {
+    // Flush any pending saves before renaming
+    get().flushSave();
+
     const { profiles, currentProfileName } = get();
 
     if (profiles.includes(newName)) {
       return { success: false, error: 'Profile with that name already exists' };
     }
 
-    // Get profile data
-    const profileData = JSON.parse(localStorage.getItem(`solas_profile_${oldName}`));
+    // Get profile data with error handling
+    const profileDataStr = localStorage.getItem(`solas_profile_${oldName}`);
+    if (!profileDataStr) {
+      return { success: false, error: `Profile "${oldName}" not found` };
+    }
+
+    let profileData;
+    try {
+      profileData = JSON.parse(profileDataStr);
+    } catch (parseError) {
+      console.error('Failed to parse profile data:', parseError);
+      return { success: false, error: `Profile "${oldName}" data is corrupted` };
+    }
+
     profileData.name = newName;
     profileData.updatedAt = new Date().toISOString();
 
@@ -306,6 +366,15 @@ const useStore = create((set, get) => ({
       return { success: false, errors: result.errors, message: errorMsg };
     }
 
+    // Validate platform exists in settings (warning only, doesn't block save)
+    const settings = get().profile?.settings;
+    const platformValidation = validateAssetPlatform(result.data, settings);
+    const warnings = [];
+    if (!platformValidation.valid && platformValidation.warning) {
+      console.warn('Asset platform warning:', platformValidation.warning);
+      warnings.push(platformValidation.warning);
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
@@ -313,7 +382,7 @@ const useStore = create((set, get) => ({
       },
     }));
     get().saveProfile();
-    return { success: true };
+    return { success: true, warnings: warnings.length > 0 ? warnings : undefined };
   },
 
   setAssets: (assets) => {
@@ -343,6 +412,15 @@ const useStore = create((set, get) => ({
       return { success: false, errors: result.errors, message: errorMsg };
     }
 
+    // Validate platform exists in settings (warning only, doesn't block save)
+    const settings = get().profile?.settings;
+    const platformValidation = validateAssetPlatform(result.data, settings);
+    const warnings = [];
+    if (!platformValidation.valid && platformValidation.warning) {
+      console.warn('Asset platform warning:', platformValidation.warning);
+      warnings.push(platformValidation.warning);
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
@@ -352,7 +430,7 @@ const useStore = create((set, get) => ({
       },
     }));
     get().saveProfile();
-    return { success: true };
+    return { success: true, warnings: warnings.length > 0 ? warnings : undefined };
   },
 
   deleteAsset: (id) => {
@@ -533,6 +611,19 @@ const useStore = create((set, get) => ({
 
   // Expense Categories (Hierarchical)
   addExpenseCategory: (category) => {
+    // Check for duplicate category names
+    const existingCategories = get().profile?.expenseCategories || [];
+    const newCategories = [...existingCategories, category];
+    const uniquenessCheck = validateExpenseCategoryUniqueness(newCategories);
+
+    if (!uniquenessCheck.valid) {
+      const duplicates = uniquenessCheck.duplicates?.join(', ') || 'Unknown';
+      return {
+        success: false,
+        message: `Category name "${category.name}" already exists. Duplicate names: ${duplicates}`
+      };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
@@ -540,9 +631,25 @@ const useStore = create((set, get) => ({
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   updateExpenseCategory: (id, updates) => {
+    // Check for duplicate category names after update
+    const existingCategories = get().profile?.expenseCategories || [];
+    const updatedCategories = existingCategories.map(c =>
+      c.id === id ? { ...c, ...updates } : c
+    );
+    const uniquenessCheck = validateExpenseCategoryUniqueness(updatedCategories);
+
+    if (!uniquenessCheck.valid) {
+      const duplicates = uniquenessCheck.duplicates?.join(', ') || 'Unknown';
+      return {
+        success: false,
+        message: `Category name already exists. Duplicate names: ${duplicates}`
+      };
+    }
+
     set((state) => ({
       profile: {
         ...state.profile,
@@ -552,6 +659,7 @@ const useStore = create((set, get) => ({
       },
     }));
     get().saveProfile();
+    return { success: true };
   },
 
   deleteExpenseCategory: (id) => {

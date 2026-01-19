@@ -12,16 +12,17 @@ export const exportExpensesToExcel = (expenseCategories, profileName = 'Profile'
   // Flatten hierarchical structure for Excel
   expenseCategories.forEach((category) => {
     category.subcategories.forEach((subcategory) => {
+      // 'amount' field stores the value per frequency (monthly or annual)
       const monthlyEquiv = subcategory.frequency === 'Annual'
-        ? (subcategory.monthlyAmount || 0) / 12
-        : (subcategory.monthlyAmount || 0);
+        ? (subcategory.amount || 0) / 12
+        : (subcategory.amount || 0);
 
       data.push({
         Category: category.name,
         Subcategory: subcategory.name,
         'Expense Type': subcategory.expenseType || 'Variable Discretionary',
         Frequency: subcategory.frequency || 'Monthly',
-        Amount: subcategory.monthlyAmount || 0,
+        Amount: subcategory.amount || 0,
         'Monthly Equivalent': monthlyEquiv,
         'Annual Amount': monthlyEquiv * 12,
         Notes: subcategory.notes || '',
@@ -105,7 +106,7 @@ export const importExpensesFromExcel = (file) => {
           category.subcategories.push({
             id: crypto.randomUUID(),
             name: subcategoryName,
-            monthlyAmount: amount,
+            amount: amount,  // Amount per frequency (monthly or annual based on frequency field)
             expenseType,
             frequency,
             notes,

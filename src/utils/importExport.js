@@ -11,29 +11,30 @@ import {
  */
 export function exportAssetsToExcel(assets, profileName, settings = null) {
   // Get exchange rates and marginal tax rate from settings if provided
-  const exchangeRates = settings?.currency?.exchangeRates || {
+  // Support both new format { USD: 18.5 } and legacy { 'USD/ZAR': 18.5 }
+  const calcExchangeRates = settings?.exchangeRates || settings?.currency?.exchangeRates || {
     'USD/ZAR': 18.50,
     'GBP/ZAR': 23.20,
     'EUR/ZAR': 19.80,
   };
   const marginalTaxRate = settings?.profile?.marginalTaxRate || 45;
-  const expectedReturns = settings?.expectedReturns || {};
+  const expectedReturnsForCalc = settings?.expectedReturns || {};
 
   // Calculate total portfolio value for percentage calculations
   const totalValue = assets.reduce((total, asset) => {
-    return total + calculateAssetValueZAR(asset, exchangeRates);
+    return total + calculateAssetValueZAR(asset, calcExchangeRates);
   }, 0);
 
   // Prepare asset data for Excel - include ALL fields + calculated values
   const assetData = assets.map(asset => {
-    const valueZAR = calculateAssetValueZAR(asset, exchangeRates);
-    const unrealizedGain = calculateUnrealizedGain(asset, exchangeRates);
+    const valueZAR = calculateAssetValueZAR(asset, calcExchangeRates);
+    const unrealizedGain = calculateUnrealizedGain(asset, calcExchangeRates);
     const cgt = calculateCGT(unrealizedGain, marginalTaxRate);
-    const netValueAfterCGT = calculateNetProceeds(asset, exchangeRates, marginalTaxRate);
+    const netValueAfterCGT = calculateNetProceeds(asset, calcExchangeRates, marginalTaxRate);
     // Use asset-specific expected return if set, otherwise use asset class default
     const expectedReturn = asset.expectedReturn !== null && asset.expectedReturn !== undefined
       ? asset.expectedReturn
-      : (expectedReturns[asset.assetClass] || 0);
+      : (expectedReturnsForCalc[asset.assetClass] || 0);
     const percentOfTotal = totalValue > 0 ? (valueZAR / totalValue) * 100 : 0;
 
     return {
@@ -86,25 +87,35 @@ export function exportAssetsToExcel(assets, profileName, settings = null) {
 export function exportSettingsToExcel(settings, profileName) {
   // Profile settings
   const profileData = [
-    { Setting: 'Name', Value: settings.profile.name || '' },
-    { Setting: 'Age', Value: settings.profile.age || 0 },
-    { Setting: 'Marginal Tax Rate (%)', Value: settings.profile.marginalTaxRate || 0 },
-    { Setting: 'Retirement Age', Value: settings.profile.retirementAge || 65 },
-    { Setting: 'Life Expectancy', Value: settings.profile.lifeExpectancy || 90 },
-    { Setting: 'Monthly Savings', Value: settings.profile.monthlySavings || 0 },
-    { Setting: 'Annual Expenses', Value: settings.profile.annualExpenses || 0 },
+    { Setting: 'Name', Value: settings.profile?.name || '' },
+    { Setting: 'Age', Value: settings.profile?.age || 0 },
+    { Setting: 'Marginal Tax Rate (%)', Value: settings.profile?.marginalTaxRate || 0 },
+    { Setting: 'Retirement Age', Value: settings.profile?.retirementAge || 65 },
+    { Setting: 'Life Expectancy', Value: settings.profile?.lifeExpectancy || 90 },
+    { Setting: 'Monthly Savings', Value: settings.profile?.monthlySavings || 0 },
+    { Setting: 'Annual Expenses', Value: settings.profile?.annualExpenses || 0 },
+    { Setting: 'Expected Inflation (%)', Value: settings.profile?.expectedInflation || 4.5 },
+    { Setting: 'Income Growth (%)', Value: settings.profile?.incomeGrowth || 5.0 },
+    { Setting: 'Default CGT Rate (%)', Value: settings.profile?.defaultCGT || 18 },
   ];
 
-  // Currency settings
+  // Currency settings - support both new and legacy structure
+  const reportingCurrency = settings.reportingCurrency || settings.currency?.reporting || 'ZAR';
   const currencyData = [
-    { Setting: 'Reporting Currency', Value: settings.currency.reporting || 'ZAR' },
+    { Setting: 'Reporting Currency', Value: reportingCurrency },
   ];
 
-  // Exchange rates
-  const exchangeRatesData = Object.entries(settings.currency.exchangeRates).map(([pair, rate]) => ({
-    'Currency Pair': pair,
-    'Rate': rate,
-  }));
+  // Exchange rates - support both new format { USD: 18.5 } and legacy { 'USD/ZAR': 18.5 }
+  const exchangeRates = settings.exchangeRates || settings.currency?.exchangeRates || {};
+  const exchangeRatesData = Object.entries(exchangeRates).map(([key, rate]) => {
+    // Convert new format to display format
+    const currencyPair = key.includes('/') ? key : `${key}/${reportingCurrency}`;
+    return {
+      'Currency Pair': currencyPair,
+      'Currency Code': key.includes('/') ? key.split('/')[0] : key,
+      'Rate': rate,
+    };
+  });
 
   // Expected returns
   const expectedReturnsData = Object.entries(settings.expectedReturns || {}).map(([assetClass, returnRate]) => ({
@@ -194,30 +205,30 @@ export function exportSettingsToExcel(settings, profileName) {
 export function exportCompleteProfile(profile) {
   const { name, assets, settings } = profile;
 
-  // Get calculation parameters from settings
-  const exchangeRates = settings?.currency?.exchangeRates || {
+  // Get calculation parameters from settings (for legacy calculation functions)
+  const calcExchangeRates = settings?.exchangeRates || settings?.currency?.exchangeRates || {
     'USD/ZAR': 18.50,
     'GBP/ZAR': 23.20,
     'EUR/ZAR': 19.80,
   };
   const marginalTaxRate = settings?.profile?.marginalTaxRate || 45;
-  const expectedReturns = settings?.expectedReturns || {};
+  const expectedReturnsForCalc = settings?.expectedReturns || {};
 
   // Calculate total portfolio value for percentage calculations
   const totalValue = assets.reduce((total, asset) => {
-    return total + calculateAssetValueZAR(asset, exchangeRates);
+    return total + calculateAssetValueZAR(asset, calcExchangeRates);
   }, 0);
 
   // Prepare asset data - ALL fields + calculated values
   const assetData = assets.map(asset => {
-    const valueZAR = calculateAssetValueZAR(asset, exchangeRates);
-    const unrealizedGain = calculateUnrealizedGain(asset, exchangeRates);
+    const valueZAR = calculateAssetValueZAR(asset, calcExchangeRates);
+    const unrealizedGain = calculateUnrealizedGain(asset, calcExchangeRates);
     const cgt = calculateCGT(unrealizedGain, marginalTaxRate);
-    const netValueAfterCGT = calculateNetProceeds(asset, exchangeRates, marginalTaxRate);
+    const netValueAfterCGT = calculateNetProceeds(asset, calcExchangeRates, marginalTaxRate);
     // Use asset-specific expected return if set, otherwise use asset class default
     const expectedReturn = asset.expectedReturn !== null && asset.expectedReturn !== undefined
       ? asset.expectedReturn
-      : (expectedReturns[asset.assetClass] || 0);
+      : (expectedReturnsForCalc[asset.assetClass] || 0);
     const percentOfTotal = totalValue > 0 ? (valueZAR / totalValue) * 100 : 0;
 
     return {
@@ -251,23 +262,34 @@ export function exportCompleteProfile(profile) {
 
   // All settings sheets
   const profileData = [
-    { Setting: 'Name', Value: settings.profile.name || '' },
-    { Setting: 'Age', Value: settings.profile.age || 0 },
-    { Setting: 'Marginal Tax Rate (%)', Value: settings.profile.marginalTaxRate || 0 },
-    { Setting: 'Retirement Age', Value: settings.profile.retirementAge || 65 },
-    { Setting: 'Life Expectancy', Value: settings.profile.lifeExpectancy || 90 },
-    { Setting: 'Monthly Savings', Value: settings.profile.monthlySavings || 0 },
-    { Setting: 'Annual Expenses', Value: settings.profile.annualExpenses || 0 },
+    { Setting: 'Name', Value: settings.profile?.name || '' },
+    { Setting: 'Age', Value: settings.profile?.age || 0 },
+    { Setting: 'Marginal Tax Rate (%)', Value: settings.profile?.marginalTaxRate || 0 },
+    { Setting: 'Retirement Age', Value: settings.profile?.retirementAge || 65 },
+    { Setting: 'Life Expectancy', Value: settings.profile?.lifeExpectancy || 90 },
+    { Setting: 'Monthly Savings', Value: settings.profile?.monthlySavings || 0 },
+    { Setting: 'Annual Expenses', Value: settings.profile?.annualExpenses || 0 },
+    { Setting: 'Expected Inflation (%)', Value: settings.profile?.expectedInflation || 4.5 },
+    { Setting: 'Income Growth (%)', Value: settings.profile?.incomeGrowth || 5.0 },
+    { Setting: 'Default CGT Rate (%)', Value: settings.profile?.defaultCGT || 18 },
   ];
 
+  // Currency settings - support both new and legacy structure
+  const reportingCurrency = settings.reportingCurrency || settings.currency?.reporting || 'ZAR';
   const currencyData = [
-    { Setting: 'Reporting Currency', Value: settings.currency.reporting || 'ZAR' },
+    { Setting: 'Reporting Currency', Value: reportingCurrency },
   ];
 
-  const exchangeRatesData = Object.entries(settings.currency.exchangeRates).map(([pair, rate]) => ({
-    'Currency Pair': pair,
-    'Rate': rate,
-  }));
+  // Exchange rates - support both new format { USD: 18.5 } and legacy { 'USD/ZAR': 18.5 }
+  const exchangeRates = settings.exchangeRates || settings.currency?.exchangeRates || {};
+  const exchangeRatesData = Object.entries(exchangeRates).map(([key, rate]) => {
+    const currencyPair = key.includes('/') ? key : `${key}/${reportingCurrency}`;
+    return {
+      'Currency Pair': currencyPair,
+      'Currency Code': key.includes('/') ? key.split('/')[0] : key,
+      'Rate': rate,
+    };
+  });
 
   const expectedReturnsData = Object.entries(settings.expectedReturns || {}).map(([assetClass, returnRate]) => ({
     'Asset Class': assetClass,
@@ -351,6 +373,8 @@ export function exportCompleteProfile(profile) {
 
 /**
  * Import assets from Excel file
+ * @param {File} file - Excel file to import
+ * @returns {Promise<Array>} Array of asset objects
  */
 export async function importAssetsFromExcel(file) {
   return new Promise((resolve, reject) => {
@@ -412,6 +436,88 @@ export async function importAssetsFromExcel(file) {
 }
 
 /**
+ * Import asset prices only from Excel file
+ * Matches assets by ID or Name, updates only currentPrice and lastUpdated
+ *
+ * @param {File} file - Excel file to import
+ * @param {Array} existingAssets - Current assets to update
+ * @returns {Promise<{updatedAssets: Array, updatedCount: number, notFoundNames: string[]}>}
+ */
+export async function importAssetPricesFromExcel(file, existingAssets) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        // Read the Assets sheet
+        const assetsSheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('asset')) || workbook.SheetNames[0];
+        const assetsSheet = workbook.Sheets[assetsSheetName];
+        const rawData = XLSX.utils.sheet_to_json(assetsSheet);
+
+        // Create lookup maps for existing assets
+        const assetById = new Map();
+        const assetByName = new Map();
+        existingAssets.forEach(asset => {
+          if (asset.id) assetById.set(asset.id, asset);
+          if (asset.name) assetByName.set(asset.name.toLowerCase().trim(), asset);
+        });
+
+        let updatedCount = 0;
+        const notFoundNames = [];
+        const updatedAssetIds = new Set();
+
+        // Process each row from Excel
+        rawData.forEach((row) => {
+          const importedId = row['ID'];
+          const importedName = row['Name'];
+          const newPrice = parseFloat(row['Current Price']);
+
+          // Skip rows without a valid price
+          if (isNaN(newPrice) || newPrice === 0) {
+            return;
+          }
+
+          // Try to find matching asset by ID first, then by name
+          let matchedAsset = null;
+          if (importedId && assetById.has(importedId)) {
+            matchedAsset = assetById.get(importedId);
+          } else if (importedName && assetByName.has(importedName.toLowerCase().trim())) {
+            matchedAsset = assetByName.get(importedName.toLowerCase().trim());
+          }
+
+          if (matchedAsset && !updatedAssetIds.has(matchedAsset.id)) {
+            // Update the asset's price and lastUpdated
+            matchedAsset.currentPrice = newPrice;
+            matchedAsset.lastUpdated = new Date().toISOString();
+            updatedAssetIds.add(matchedAsset.id);
+            updatedCount++;
+          } else if (!matchedAsset && importedName) {
+            notFoundNames.push(importedName);
+          }
+        });
+
+        resolve({
+          updatedAssets: existingAssets,
+          updatedCount,
+          notFoundNames,
+        });
+      } catch (error) {
+        reject(new Error('Failed to parse Excel file: ' + error.message));
+      }
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Failed to read file'));
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
  * Import settings from Excel file
  */
 export async function importSettingsFromExcel(file) {
@@ -423,13 +529,15 @@ export async function importSettingsFromExcel(file) {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
 
+        // Use new format structure (not legacy)
         const settings = {
           profile: {},
-          currency: { exchangeRates: {} },
+          reportingCurrency: 'ZAR',
+          exchangeRates: {},
           expectedReturns: {},
           targetAllocation: {},
           thresholds: {},
-          retirementExpensePhases: {},
+          lifePhases: {},
           withdrawalRates: {},
         };
 
@@ -450,6 +558,9 @@ export async function importSettingsFromExcel(file) {
             if (setting === 'Life Expectancy') settings.profile.lifeExpectancy = parseInt(value) || 90;
             if (setting === 'Monthly Savings') settings.profile.monthlySavings = parseFloat(value) || 0;
             if (setting === 'Annual Expenses') settings.profile.annualExpenses = parseFloat(value) || 0;
+            if (setting === 'Expected Inflation (%)') settings.profile.expectedInflation = parseFloat(value) || 4.5;
+            if (setting === 'Income Growth (%)') settings.profile.incomeGrowth = parseFloat(value) || 5.0;
+            if (setting === 'Default CGT Rate (%)') settings.profile.defaultCGT = parseFloat(value) || 18;
           });
         }
 
@@ -460,20 +571,27 @@ export async function importSettingsFromExcel(file) {
 
           currencyData.forEach(row => {
             if (row['Setting'] === 'Reporting Currency') {
-              settings.currency.reporting = row['Value'] || 'ZAR';
+              settings.reportingCurrency = row['Value'] || 'ZAR';
             }
           });
         }
 
-        // Read Exchange Rates sheet
+        // Read Exchange Rates sheet - convert to new format { USD: 18.5 }
         if (workbook.SheetNames.includes('Exchange Rates')) {
           const ratesSheet = workbook.Sheets['Exchange Rates'];
           const ratesData = XLSX.utils.sheet_to_json(ratesSheet);
 
           ratesData.forEach(row => {
-            const pair = row['Currency Pair'];
             const rate = parseFloat(row['Rate']) || 1;
-            settings.currency.exchangeRates[pair] = rate;
+            // Prefer 'Currency Code' column if present, otherwise extract from 'Currency Pair'
+            let currencyCode = row['Currency Code'];
+            if (!currencyCode && row['Currency Pair']) {
+              // Extract currency code from pair like 'USD/ZAR' -> 'USD'
+              currencyCode = row['Currency Pair'].split('/')[0];
+            }
+            if (currencyCode && currencyCode !== settings.reportingCurrency) {
+              settings.exchangeRates[currencyCode] = rate;
+            }
           });
         }
 

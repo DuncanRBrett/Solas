@@ -93,6 +93,68 @@ export const detectVersion = (profile) => {
 };
 
 /**
+ * Normalize expense subcategory fields
+ * Migrates 'monthlyAmount' to 'amount' (field was misleadingly named)
+ *
+ * @param {object} subcategory - Expense subcategory object
+ * @returns {object} - Normalized subcategory
+ */
+const normalizeExpenseSubcategory = (subcategory) => {
+  if (!subcategory) return subcategory;
+
+  // If subcategory has old 'monthlyAmount' field but not 'amount', migrate it
+  if (subcategory.monthlyAmount !== undefined && subcategory.amount === undefined) {
+    const { monthlyAmount, ...rest } = subcategory;
+    return {
+      ...rest,
+      amount: monthlyAmount,
+    };
+  }
+
+  // If both exist (shouldn't happen, but be safe), prefer 'amount'
+  if (subcategory.monthlyAmount !== undefined && subcategory.amount !== undefined) {
+    const { monthlyAmount, ...rest } = subcategory;
+    return rest;
+  }
+
+  return subcategory;
+};
+
+/**
+ * Apply field normalizations to profile
+ * These run on every load to ensure data consistency
+ *
+ * @param {object} profile - Profile to normalize
+ * @returns {{ profile: object, normalized: boolean }}
+ */
+const normalizeProfileFields = (profile) => {
+  let normalized = false;
+
+  // Normalize expense categories and subcategories
+  if (profile.expenseCategories && Array.isArray(profile.expenseCategories)) {
+    const normalizedCategories = profile.expenseCategories.map(category => {
+      if (category.subcategories && Array.isArray(category.subcategories)) {
+        const normalizedSubs = category.subcategories.map(sub => {
+          const normalizedSub = normalizeExpenseSubcategory(sub);
+          if (normalizedSub !== sub) {
+            normalized = true;
+          }
+          return normalizedSub;
+        });
+        return { ...category, subcategories: normalizedSubs };
+      }
+      return category;
+    });
+
+    if (normalized) {
+      profile = { ...profile, expenseCategories: normalizedCategories };
+    }
+  }
+
+  return { profile, normalized };
+};
+
+/**
  * Migrate profile to current version
  *
  * @param {object} profile - Profile data to migrate
@@ -100,35 +162,41 @@ export const detectVersion = (profile) => {
  */
 export const migrateProfile = (profile) => {
   const currentVersion = detectVersion(profile);
-
-  // Already at current version
-  if (currentVersion === CURRENT_DATA_VERSION) {
-    return {
-      migrated: false,
-      profile,
-      currentVersion,
-    };
-  }
-
-  console.log(`Migrating profile from ${currentVersion} to ${CURRENT_DATA_VERSION}`);
-
   let migratedProfile = { ...profile };
   const migrationsApplied = [];
+  let wasVersionMigrated = false;
 
-  // Apply migration chain
-  if (currentVersion === '2.x') {
-    migratedProfile = migrations['2.x_to_3.0.0'](migratedProfile);
-    migrationsApplied.push('2.x_to_3.0.0');
+  // Apply version-based migrations
+  if (currentVersion !== CURRENT_DATA_VERSION) {
+    console.log(`Migrating profile from ${currentVersion} to ${CURRENT_DATA_VERSION}`);
+
+    // Apply migration chain
+    if (currentVersion === '2.x') {
+      migratedProfile = migrations['2.x_to_3.0.0'](migratedProfile);
+      migrationsApplied.push('2.x_to_3.0.0');
+      wasVersionMigrated = true;
+    }
+
+    // Future migration chains
+    // if (currentVersion === '3.0.0') {
+    //   migratedProfile = migrations['3.0.0_to_3.1.0'](migratedProfile);
+    //   migrationsApplied.push('3.0.0_to_3.1.0');
+    // }
   }
 
-  // Future migration chains
-  // if (currentVersion === '3.0.0') {
-  //   migratedProfile = migrations['3.0.0_to_3.1.0'](migratedProfile);
-  //   migrationsApplied.push('3.0.0_to_3.1.0');
-  // }
+  // Apply field normalizations (always, regardless of version)
+  // This handles field renames and other non-version-specific migrations
+  const normalizationResult = normalizeProfileFields(migratedProfile);
+  migratedProfile = normalizationResult.profile;
+
+  if (normalizationResult.normalized) {
+    migrationsApplied.push('field-normalization');
+  }
+
+  const wasMigrated = wasVersionMigrated || normalizationResult.normalized;
 
   return {
-    migrated: true,
+    migrated: wasMigrated,
     profile: migratedProfile,
     migrationsApplied,
     fromVersion: currentVersion,

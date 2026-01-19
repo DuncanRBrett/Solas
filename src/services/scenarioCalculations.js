@@ -28,6 +28,58 @@ import {
 import { DEFAULT_SETTINGS } from '../models/defaults';
 
 /**
+ * Calculation version for audit trail
+ * Increment this when making changes to calculation logic
+ * Format: MAJOR.MINOR.PATCH
+ * - MAJOR: Breaking changes to calculation methodology
+ * - MINOR: New features or significant calculation improvements
+ * - PATCH: Bug fixes or minor adjustments
+ */
+export const CALCULATION_VERSION = '3.0.0';
+
+/**
+ * Validate a number is finite and not NaN
+ * Returns the value if valid, or fallback otherwise
+ * @param {number} value - Value to check
+ * @param {number} fallback - Fallback value if invalid
+ * @param {string} context - Context for logging
+ * @returns {number} Valid number
+ */
+const validateNumber = (value, fallback = 0, context = '') => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    if (context) {
+      console.warn(`Invalid number in ${context}: ${value}, using ${fallback}`);
+    }
+    return fallback;
+  }
+  return value;
+};
+
+/**
+ * Validate year data object has no NaN/Infinity values
+ * Replaces invalid values with safe defaults
+ * @param {object} yearData - Year data object to validate
+ * @param {number} age - Age for logging context
+ * @returns {object} Validated year data
+ */
+const validateYearData = (yearData, age) => {
+  const validated = { ...yearData };
+  const numericFields = [
+    'netWorth', 'expenses', 'income', 'incomeTax', 'withdrawalTax',
+    'totalTax', 'coveredByIncome', 'coveredByReturns', 'capitalDrawdown',
+    'drawdownRate', 'withdrawal', 'savings', 'fees'
+  ];
+
+  numericFields.forEach(field => {
+    if (field in validated) {
+      validated[field] = validateNumber(validated[field], 0, `yearData.${field} at age ${age}`);
+    }
+  });
+
+  return validated;
+};
+
+/**
  * Calculate expense multiplier based on age phase
  * Supports both legacy 3-phase and new 4-phase life phases configurations
  */
@@ -66,7 +118,18 @@ export const getExpenseMultiplier = (age, expensePhases) => {
 };
 
 /**
- * Calculate dividend income from assets (after 20% withholding tax)
+ * Calculate dividend income from assets
+ *
+ * IMPORTANT: dividendYield should be entered as the NET yield (after 20% dividend withholding tax).
+ * This is how most fund fact sheets report it. For example:
+ * - If a fund pays 5% gross dividend yield, the net yield is 5% × 0.80 = 4%
+ * - Enter 4% in the dividendYield field
+ *
+ * The withholding tax is already deducted at source, so no further tax adjustment is needed.
+ *
+ * @param {Array} assets - Array of asset objects
+ * @param {object} exchangeRates - Legacy format exchange rates
+ * @returns {number} Annual dividend income in ZAR (already net of withholding tax)
  */
 export const calculateDividendIncomeFromAssets = (assets, exchangeRates) => {
   return assets
@@ -76,7 +139,7 @@ export const calculateDividendIncomeFromAssets = (assets, exchangeRates) => {
       // Use dividendYield if available, fall back to incomeYield for backwards compatibility
       const yield_ = asset.dividendYield || asset.incomeYield || 0;
       const annualDividend = valueZAR * (yield_ / 100);
-      // Dividend income is already after 20% withholding tax
+      // No tax adjustment needed - dividendYield is already net of 20% withholding tax
       return sum + annualDividend;
     }, 0);
 };
@@ -251,10 +314,49 @@ export const calculateWithdrawalCGT = (withdrawalAmount, assets, exchangeRates, 
   // Total tax on the withdrawal
   const totalTax = cgt + raTax;
 
-  // Calculate grossForNet with divide-by-zero protection
-  // If totalTax equals withdrawalAmount (100% tax), grossForNet would be infinite
+  // Calculate grossForNet: How much gross withdrawal is needed to get a net amount after tax?
+  // Formula: grossForNet = netAmount / (1 - taxRatio)
+  //
+  // Edge case protection:
+  // - If taxRatio >= 1 (100%+ effective tax rate, which shouldn't happen in reality),
+  //   we cap the gross amount to avoid negative or infinite values.
+  // - In practice, SA maximum effective tax rates are:
+  //   * CGT: 40% inclusion × 45% = 18% max
+  //   * RA withdrawal: 45% marginal rate max
+  //   * Blended rate depends on account mix
+  //
+  // If this edge case is ever hit, it likely indicates bad input data (e.g., marginal rate > 100%)
   const taxRatio = withdrawalAmount > 0 ? totalTax / withdrawalAmount : 0;
-  const grossForNet = taxRatio >= 1 ? withdrawalAmount * 2 : withdrawalAmount / (1 - taxRatio);
+  let grossForNet;
+
+  // Validate and cap tax ratio to reasonable bounds
+  // SA maximum realistic tax rates:
+  // - CGT: 40% inclusion × 45% = 18% max
+  // - RA withdrawal: 45% marginal rate max
+  // - Blended max: ~45% if all RA
+  // Anything above 50% is almost certainly an error
+  const MAX_REASONABLE_TAX_RATIO = 0.50;
+
+  if (taxRatio > MAX_REASONABLE_TAX_RATIO) {
+    console.warn(
+      `Tax ratio ${(taxRatio * 100).toFixed(1)}% exceeds maximum reasonable rate of ${MAX_REASONABLE_TAX_RATIO * 100}%. ` +
+      `This likely indicates incorrect settings. Capping at ${MAX_REASONABLE_TAX_RATIO * 100}%.`
+    );
+    // Use capped ratio for calculation
+    grossForNet = withdrawalAmount / (1 - MAX_REASONABLE_TAX_RATIO);
+  } else if (taxRatio < 0) {
+    // Negative tax ratio should never happen - treat as 0%
+    console.warn(`Negative tax ratio detected (${(taxRatio * 100).toFixed(1)}%). Using 0% instead.`);
+    grossForNet = withdrawalAmount;
+  } else {
+    grossForNet = withdrawalAmount / (1 - taxRatio);
+  }
+
+  // Final sanity check - gross should never be more than 2× net (implies >50% tax)
+  if (grossForNet > withdrawalAmount * 2) {
+    console.warn(`Gross-for-net calculation produced unreasonable value. Capping at 2× withdrawal amount.`);
+    grossForNet = withdrawalAmount * 2;
+  }
 
   return {
     cgt,                                    // CGT specifically (Taxable accounts)
@@ -274,12 +376,48 @@ export const calculateWithdrawalCGT = (withdrawalAmount, assets, exchangeRates, 
 };
 
 /**
+ * Calculate currency allocation for investible assets
+ * Returns the proportion of portfolio value in each currency
+ *
+ * @param {Array} assets - Array of asset objects
+ * @param {object} exchangeRates - Exchange rates for currency conversion
+ * @param {string} reportingCurrency - The reporting currency (e.g., 'ZAR')
+ * @returns {object} { currency: weight } - weights summing to 1
+ */
+export const calculateCurrencyAllocation = (assets, exchangeRates, reportingCurrency = 'ZAR') => {
+  const currencyValues = {};
+  let totalValue = 0;
+
+  (assets || []).forEach(asset => {
+    if (asset.assetType === 'Investible') {
+      const value = calculateAssetValueZAR(asset, exchangeRates);
+      const currency = asset.currency || reportingCurrency;
+
+      currencyValues[currency] = (currencyValues[currency] || 0) + value;
+      totalValue += value;
+    }
+  });
+
+  if (totalValue === 0) {
+    return { [reportingCurrency]: 1 }; // Default to all in reporting currency
+  }
+
+  // Convert to weights
+  const allocation = {};
+  for (const currency in currencyValues) {
+    allocation[currency] = currencyValues[currency] / totalValue;
+  }
+
+  return allocation;
+};
+
+/**
  * Calculate account type weights for withdrawal tax calculation
  * Returns the proportion of investible assets in each account type
  *
  * @param {Array} assets - Array of asset objects
  * @param {object} exchangeRates - Exchange rates for currency conversion
- * @returns {object} { tfsa, taxable, ra } - weights summing to 1
+ * @returns {object} { tfsa, taxable, ra, isEmpty } - weights summing to 1, plus flag if no assets
  */
 export const calculateAccountTypeWeights = (assets, exchangeRates) => {
   let tfsaValue = 0;
@@ -302,14 +440,24 @@ export const calculateAccountTypeWeights = (assets, exchangeRates) => {
   });
 
   const totalValue = tfsaValue + taxableValue + raValue;
+
   if (totalValue === 0) {
-    return { tfsa: 0, taxable: 1, ra: 0 }; // Default to all taxable
+    // No investible assets - return balanced assumption rather than all taxable
+    // This is more conservative for tax projections (assumes some tax-advantaged accounts)
+    // The isEmpty flag allows callers to handle this case specially if needed
+    return {
+      tfsa: 0.15,    // Assume 15% TFSA (common SA allocation)
+      taxable: 0.60, // Assume 60% taxable
+      ra: 0.25,      // Assume 25% RA
+      isEmpty: true, // Flag that this is an estimate, not actual data
+    };
   }
 
   return {
     tfsa: tfsaValue / totalValue,
     taxable: taxableValue / totalValue,
     ra: raValue / totalValue,
+    isEmpty: false,
   };
 };
 
@@ -354,6 +502,59 @@ export const calculateTaxablePortfolioGainRatio = (assets, exchangeRates, report
     totalGain,           // Total unrealized gain
     gainPercentage: gainRatio * 100,  // As percentage for display
   };
+};
+
+/**
+ * Estimate the gain ratio for a given portfolio state during projection
+ *
+ * As the portfolio grows, the gain ratio increases because:
+ * - New returns add to gains (not cost basis)
+ * - Withdrawals reduce both value and cost proportionally
+ *
+ * This provides a more accurate CGT estimate than using the static initial ratio.
+ *
+ * @param {number} initialValue - Starting portfolio value
+ * @param {number} initialCost - Starting cost basis
+ * @param {number} currentValue - Current portfolio value in projection
+ * @param {number} totalWithdrawn - Total amount withdrawn so far
+ * @param {number} initialGainRatio - Initial gain ratio from actual portfolio
+ * @returns {number} Estimated gain ratio (0-1)
+ */
+export const estimateGainRatioForProjection = (
+  initialValue,
+  initialCost,
+  currentValue,
+  totalWithdrawn,
+  initialGainRatio
+) => {
+  // Edge cases
+  if (currentValue <= 0) return 0;
+  if (initialValue <= 0) return initialGainRatio;
+
+  // Calculate estimated cost basis
+  // Withdrawals are assumed to come proportionally from cost and gain
+  // So withdrawals reduce cost basis by: withdrawal × (1 - gainRatio at time of withdrawal)
+  // For simplicity, we estimate using initial gain ratio for historical withdrawals
+
+  // Estimated cost remaining after proportional withdrawals
+  // costRemaining = initialCost × (1 - withdrawalRate)
+  // where withdrawalRate = totalWithdrawn / (initialValue + totalGrowth)
+  // Simplified: assume cost reduces proportionally to value reduction from withdrawals
+
+  const valueBeforeWithdrawals = currentValue + totalWithdrawn;
+  const withdrawalProportion = totalWithdrawn / Math.max(valueBeforeWithdrawals, 1);
+
+  // Cost basis reduces proportionally with withdrawals
+  const estimatedCostRemaining = initialCost * (1 - withdrawalProportion);
+
+  // Current gain = current value - remaining cost
+  const estimatedGain = Math.max(0, currentValue - estimatedCostRemaining);
+
+  // Gain ratio = gain / value
+  const estimatedGainRatio = currentValue > 0 ? estimatedGain / currentValue : 0;
+
+  // Clamp to reasonable range (0 to 0.95 - some cost basis always remains)
+  return Math.min(0.95, Math.max(0, estimatedGainRatio));
 };
 
 /**
@@ -567,11 +768,12 @@ export const runScenario = (scenario, profile) => {
       expenseCategories.forEach(category => {
         (category.subcategories || []).forEach(sub => {
           const currency = sub.currency || 'ZAR';
-          // When frequency is 'Annual', monthlyAmount field actually contains the annual amount
-          // When frequency is 'Monthly', monthlyAmount field contains the monthly amount
+          // 'amount' field stores the value per frequency period:
+          // - If frequency = 'Annual': amount contains the ANNUAL amount
+          // - If frequency = 'Monthly': amount contains the monthly amount (multiply by 12)
           const annualAmount = sub.frequency === 'Annual'
-            ? (sub.monthlyAmount || 0)  // Already annual
-            : (sub.monthlyAmount || 0) * 12;  // Convert monthly to annual
+            ? (sub.amount || 0)  // Already annual
+            : (sub.amount || 0) * 12;  // Convert monthly to annual
           const annualAmountZAR = toZAR(annualAmount, currency, exchangeRates);
           baseAnnualExpenses += annualAmountZAR;
         });
@@ -598,6 +800,8 @@ export const runScenario = (scenario, profile) => {
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
   const gainRatioData = calculateTaxablePortfolioGainRatio(assets, exchangeRates, reportingCurrency);
   const initialGainRatio = gainRatioData.gainRatio; // Proportion of taxable portfolio that is gain
+  const initialTaxableValue = gainRatioData.totalValue; // Initial taxable portfolio value
+  const initialTaxableCost = gainRatioData.totalCost; // Initial cost basis
 
   // CGT rate (40% inclusion × marginal rate) - applied only to gain portion
   const cgtInclusionRate = 0.4;
@@ -608,6 +812,21 @@ export const runScenario = (scenario, profile) => {
 
   // Calculate equity percentage for crash impact (fallback for legacy crashes)
   const equityPercentage = calculateEquityPercentage(assets);
+
+  // Calculate currency allocation for currency movement modeling
+  const currencyAllocation = calculateCurrencyAllocation(assets, exchangeRates, reportingCurrency);
+
+  // Calculate blended currency effect if currency movement is enabled
+  // This is added to portfolio returns each year
+  let currencyEffect = 0;
+  if (useCurrencyMovement && currencyMovement) {
+    // Calculate weighted currency effect based on allocation to each currency
+    for (const currency in currencyAllocation) {
+      if (currency !== reportingCurrency && currencyMovement[currency]) {
+        currencyEffect += currencyAllocation[currency] * (currencyMovement[currency] || 0);
+      }
+    }
+  }
 
   // Calculate asset-based income (current - will grow with portfolio)
   const baseDividendIncome = calculateDividendIncomeFromAssets(assets, exchangeRates);
@@ -629,8 +848,13 @@ export const runScenario = (scenario, profile) => {
   // Real return calculation - using weighted portfolio return
   const realReturn = ((1 + weightedReturn / 100) / (1 + inflationRate / 100) - 1) * 100;
 
-  // Run simulation year by year
+  // Track any calculation errors
+  let calculationErrors = [];
+
+  // Run simulation year by year with error handling
+  try {
   for (let age = currentAge; age <= lifeExpectancy; age++) {
+    try {
     const yearsFromNow = age - currentAge;
     const yearsFromRetirement = age - retirementAge;
 
@@ -710,13 +934,23 @@ export const runScenario = (scenario, profile) => {
 
       if (netNeeded > 0) {
         // Expenses exceed income - need to withdraw from portfolio
-        // Calculate withdrawal tax based on account type mix and gain ratio
+        // Calculate withdrawal tax based on account type mix and DYNAMIC gain ratio
         const tfsaWithdrawal = netNeeded * accountTypeWeights.tfsa;
         const taxableWithdrawal = netNeeded * accountTypeWeights.taxable;
         const raWithdrawal = netNeeded * accountTypeWeights.ra;
 
+        // Calculate dynamic gain ratio based on portfolio evolution
+        // This accounts for gains compounding and proportional withdrawals
+        const currentGainRatio = estimateGainRatioForProjection(
+          initialTaxableValue,
+          initialTaxableCost,
+          portfolioValue * accountTypeWeights.taxable, // Taxable portion of current portfolio
+          totalWithdrawn * accountTypeWeights.taxable, // Taxable portion of withdrawals
+          initialGainRatio
+        );
+
         const tfsaTax = 0;
-        const taxableTax = taxableWithdrawal * initialGainRatio * cgtRate;
+        const taxableTax = taxableWithdrawal * currentGainRatio * cgtRate;
         const raTax = raWithdrawal * (marginalTaxRate / 100);
 
         yearWithdrawalTax = tfsaTax + taxableTax + raTax;
@@ -731,15 +965,10 @@ export const runScenario = (scenario, profile) => {
       // Add savings to portfolio
       portfolioValue += annualSavings;
 
-      // Grow portfolio using weighted return
-      portfolioValue *= (1 + weightedReturn / 100);
-
-      // Apply currency movement for non-reporting currency assets
-      if (useCurrencyMovement && currencyMovement) {
-        // This is a simplified model - in reality, currency movement affects each asset differently
-        // For now, we apply a blended currency effect based on non-ZAR asset allocation
-        // This is captured in the overall return assumption
-      }
+      // Grow portfolio using weighted return + currency effect
+      // Currency effect is a blended rate based on portfolio currency allocation
+      const totalReturn = weightedReturn + currencyEffect;
+      portfolioValue *= (1 + totalReturn / 100);
 
       // Deduct fees after growth
       const yearFees = calculateScenarioYearFees(portfolioValue, settings);
@@ -757,7 +986,8 @@ export const runScenario = (scenario, profile) => {
       // Calculate drawdown rate for pre-retirement too
       yearData.drawdownRate = yearData.netWorth > 0 ? (yearWithdrawal / yearData.netWorth) * 100 : 0;
 
-      trajectory.push(yearData);
+      // Validate and push year data
+      trajectory.push(validateYearData(yearData, age));
     } else {
       // Post-retirement
       const netNeeded = inflationAdjustedExpenses - netIncome;
@@ -777,8 +1007,9 @@ export const runScenario = (scenario, profile) => {
 
       if (netNeeded > 0) {
         // Need to withdraw from portfolio
-        // Calculate potential returns on current portfolio
-        const potentialReturns = portfolioValue * (weightedReturn / 100);
+        // Calculate potential returns on current portfolio (including currency effect)
+        const totalReturnRate = weightedReturn + currencyEffect;
+        const potentialReturns = portfolioValue * (totalReturnRate / 100);
 
         // If returns can cover the shortfall, we're using returns not capital
         if (potentialReturns >= netNeeded) {
@@ -794,18 +1025,28 @@ export const runScenario = (scenario, profile) => {
           yearCapitalDrawdown = capitalNeeded;
         }
 
-        // Calculate withdrawal tax based on account type mix and gain ratio
+        // Calculate withdrawal tax based on account type mix and DYNAMIC gain ratio
         // - TFSA portion: 0% tax
         // - Taxable portion: CGT only on gain portion (gainRatio × cgtRate)
         // - RA portion: Full income tax at marginal rate
         //
-        // Note: This is an ESTIMATE. The gain ratio is based on current portfolio
-        // and may change over time as the portfolio composition shifts.
+        // Note: Gain ratio is dynamically estimated based on portfolio evolution
+        // to provide more accurate CGT projections over long time horizons.
 
         // Proportional withdrawal from each account type
         const tfsaWithdrawal = netNeeded * accountTypeWeights.tfsa;
         const taxableWithdrawal = netNeeded * accountTypeWeights.taxable;
         const raWithdrawal = netNeeded * accountTypeWeights.ra;
+
+        // Calculate dynamic gain ratio based on portfolio evolution
+        // This accounts for gains compounding and proportional withdrawals
+        const currentGainRatio = estimateGainRatioForProjection(
+          initialTaxableValue,
+          initialTaxableCost,
+          portfolioValue * accountTypeWeights.taxable, // Taxable portion of current portfolio
+          totalWithdrawn * accountTypeWeights.taxable, // Taxable portion of withdrawals
+          initialGainRatio
+        );
 
         // Calculate tax on each portion
         // TFSA: No tax
@@ -813,7 +1054,7 @@ export const runScenario = (scenario, profile) => {
 
         // Taxable: CGT only on the GAIN portion of the withdrawal
         // CGT = withdrawal × gainRatio × 40% inclusion × marginal rate
-        const taxableTax = taxableWithdrawal * initialGainRatio * cgtRate;
+        const taxableTax = taxableWithdrawal * currentGainRatio * cgtRate;
 
         // RA: Full income tax at marginal rate
         const raTax = raWithdrawal * (marginalTaxRate / 100);
@@ -851,11 +1092,13 @@ export const runScenario = (scenario, profile) => {
       yearData.drawdownRate = yearDrawdownRate;
       yearData.withdrawal = yearWithdrawal;
 
-      trajectory.push(yearData);
+      // Validate and push year data
+      trajectory.push(validateYearData(yearData, age));
 
-      // Grow remaining portfolio using weighted return
+      // Grow remaining portfolio using weighted return + currency effect
       if (portfolioValue > 0) {
-        portfolioValue *= (1 + weightedReturn / 100);
+        const totalReturn = weightedReturn + currencyEffect;
+        portfolioValue *= (1 + totalReturn / 100);
 
         // Deduct fees after growth
         const yearFees = calculateScenarioYearFees(portfolioValue, settings);
@@ -901,12 +1144,57 @@ export const runScenario = (scenario, profile) => {
       portfolioValue -= unexpectedExpense.amount;
     }
 
+    // Validate portfolio value
+    portfolioValue = validateNumber(portfolioValue, 0, `portfolioValue at age ${age}`);
+
     // Check for depletion
     if (portfolioValue < 0 && success) {
       success = false;
       depletionAge = age;
       portfolioValue = 0; // Can't go negative
     }
+
+    } catch (yearError) {
+      // Handle error for this specific year
+      console.error(`Error calculating year at age ${age}:`, yearError);
+      calculationErrors.push({ age, error: yearError.message });
+
+      // Add a placeholder year data to keep trajectory consistent
+      trajectory.push({
+        age,
+        netWorth: portfolioValue,
+        isRetired: age >= retirementAge,
+        expenses: 0,
+        income: 0,
+        error: true,
+        errorMessage: yearError.message,
+      });
+    }
+  }
+  } catch (loopError) {
+    // Handle error in the overall simulation
+    console.error('Critical error in scenario simulation:', loopError);
+    return {
+      trajectory,
+      success: false,
+      depletionAge: null,
+      finalValue: portfolioValue,
+      shortfall: 0,
+      totalWithdrawn,
+      totalWithdrawalTax,
+      totalIncome,
+      totalExpenses,
+      totalFeesPaid,
+      expenseCoverageBreakdown: {
+        byIncome: { amount: 0, percentage: 0 },
+        byReturns: { amount: 0, percentage: 0 },
+        byCapitalDrawdown: { amount: 0, percentage: 0 },
+      },
+      metrics: {},
+      runAt: new Date().toISOString(),
+      error: `Simulation failed: ${loopError.message}`,
+      calculationErrors,
+    };
   }
 
   // Final trajectory point
@@ -968,6 +1256,7 @@ export const runScenario = (scenario, profile) => {
       assetClassPercentages, // Include for UI display
     },
     runAt: new Date().toISOString(),
+    calculationVersion: CALCULATION_VERSION,
   };
 };
 
@@ -1083,9 +1372,10 @@ export const calculateRetirementReadiness = (profile) => {
     expenseCategories.forEach(category => {
       (category.subcategories || []).forEach(sub => {
         const currency = sub.currency || 'ZAR';
+        // 'amount' field stores the value per frequency period
         const annualAmount = sub.frequency === 'Annual'
-          ? (sub.monthlyAmount || 0)
-          : (sub.monthlyAmount || 0) * 12;
+          ? (sub.amount || 0)
+          : (sub.amount || 0) * 12;
         const annualAmountZAR = toZAR(annualAmount, currency, exchangeRates);
         annualExpenses += annualAmountZAR;
       });

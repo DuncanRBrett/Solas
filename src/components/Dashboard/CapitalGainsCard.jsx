@@ -1,14 +1,16 @@
 import { useMemo } from 'react';
 import useStore from '../../store/useStore';
 import { calculateAssetValue, toReportingCurrency, getExchangeRates, formatInReportingCurrency } from '../../utils/calculations';
+import { DEFAULT_SETTINGS } from '../../models/defaults';
 import './CapitalGainsCard.css';
 
 function CapitalGainsCard() {
   const { profile } = useStore();
-  const { assets, settings } = profile;
-  const reportingCurrency = settings.reportingCurrency || 'ZAR';
+  const { assets = [], settings = DEFAULT_SETTINGS } = profile ?? {};
+  const reportingCurrency = settings?.reportingCurrency ?? DEFAULT_SETTINGS.reportingCurrency;
   const exchangeRates = getExchangeRates(settings);
-  const marginalTaxRate = settings.profile?.marginalTaxRate || 45; // Stored as percentage (39, 45, etc.)
+  // Use nullish coalescing to preserve zero values; fall back to default from constants
+  const marginalTaxRate = settings?.profile?.marginalTaxRate ?? DEFAULT_SETTINGS.profile.marginalTaxRate;
 
   const gainsData = useMemo(() => {
     let totalUnrealizedGain = 0;
@@ -51,11 +53,12 @@ function CapitalGainsCard() {
       investibleAssetsCost += costBasis;
       totalUnrealizedGain += gain;
 
-      // Track by account type
-      const accountType = asset.accountType || 'Taxable';
+      // Track by account type - use nullish coalescing for proper null safety
+      const accountType = asset.accountType ?? 'Taxable';
       if (gainsByAccountType[accountType] !== undefined) {
         gainsByAccountType[accountType] += gain;
       } else {
+        // Unknown account type - treat as taxable
         gainsByAccountType['Taxable'] += gain;
       }
 

@@ -22,10 +22,10 @@ function AgeBasedExpensePlanning({ onClose }) {
       let categoryTotal = 0;
 
       category.subcategories.forEach((subcategory) => {
-        // Convert to monthly equivalent
+        // 'amount' field stores the value per frequency (monthly or annual)
         const monthlyAmount = subcategory.frequency === 'Annual'
-          ? (subcategory.monthlyAmount || 0) / 12
-          : (subcategory.monthlyAmount || 0);
+          ? (subcategory.amount || 0) / 12
+          : (subcategory.amount || 0);
 
         // Convert to reporting currency
         const currency = subcategory.currency || reportingCurrency;

@@ -34,13 +34,32 @@ ChartJS.register(
 );
 
 function Fees() {
-  const { profile } = useStore();
+  const { profile, updateSettings } = useStore();
   const { assets, settings } = profile;
   const reportingCurrency = settings.reportingCurrency || 'ZAR';
 
-  const [projectionYears, setProjectionYears] = useState(30);
-  const [inflationRate, setInflationRate] = useState(5.0);
-  const [portfolioGrowthRate, setPortfolioGrowthRate] = useState(9.0);
+  // Load UI preferences from settings, with fallbacks
+  const uiPreferences = settings.uiPreferences || {};
+  const feesPreferences = uiPreferences.fees || {};
+
+  const [projectionYears, setProjectionYears] = useState(feesPreferences.projectionYears || 30);
+  const [inflationRate, setInflationRate] = useState(feesPreferences.inflationRate || 5.0);
+  const [portfolioGrowthRate, setPortfolioGrowthRate] = useState(feesPreferences.portfolioGrowthRate || 9.0);
+
+  // Persist fees preferences when they change
+  const updateFeesPreferences = (updates) => {
+    const currentPrefs = settings.uiPreferences || {};
+    const currentFeesPrefs = currentPrefs.fees || {};
+    updateSettings({
+      uiPreferences: {
+        ...currentPrefs,
+        fees: {
+          ...currentFeesPrefs,
+          ...updates,
+        },
+      },
+    });
+  };
 
   const fmt = (amount) => formatInReportingCurrency(amount, 0, reportingCurrency);
 
@@ -351,7 +370,11 @@ function Fees() {
               min="5"
               max="50"
               value={projectionYears}
-              onChange={(e) => setProjectionYears(parseInt(e.target.value) || 30)}
+              onChange={(e) => {
+                const value = parseInt(e.target.value) || 30;
+                setProjectionYears(value);
+                updateFeesPreferences({ projectionYears: value });
+              }}
             />
           </div>
 
@@ -363,7 +386,11 @@ function Fees() {
               min="0"
               max="20"
               value={inflationRate}
-              onChange={(e) => setInflationRate(parseFloat(e.target.value) || 5.0)}
+              onChange={(e) => {
+                const value = parseFloat(e.target.value) || 5.0;
+                setInflationRate(value);
+                updateFeesPreferences({ inflationRate: value });
+              }}
             />
           </div>
 
@@ -375,7 +402,11 @@ function Fees() {
               min="0"
               max="30"
               value={portfolioGrowthRate}
-              onChange={(e) => setPortfolioGrowthRate(parseFloat(e.target.value) || 9.0)}
+              onChange={(e) => {
+                const value = parseFloat(e.target.value) || 9.0;
+                setPortfolioGrowthRate(value);
+                updateFeesPreferences({ portfolioGrowthRate: value });
+              }}
             />
           </div>
         </div>

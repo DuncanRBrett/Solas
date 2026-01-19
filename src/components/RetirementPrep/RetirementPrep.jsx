@@ -54,10 +54,10 @@ function RetirementPrep() {
     let total = 0;
     expenseCategories.forEach(category => {
       category.subcategories.forEach(sub => {
-        // Get the amount in original currency
+        // 'amount' field stores the value per frequency (monthly or annual)
         const amountInCurrency = sub.frequency === 'Annual'
-          ? (sub.monthlyAmount || 0) / 12
-          : (sub.monthlyAmount || 0);
+          ? (sub.amount || 0) / 12
+          : (sub.amount || 0);
         // Convert to ZAR
         const currency = sub.currency || 'ZAR';
         const monthlyAmountZAR = toZAR(amountInCurrency, currency, exchangeRates);

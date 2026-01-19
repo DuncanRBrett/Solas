@@ -36,8 +36,27 @@ ChartJS.register(
 );
 
 function Scenarios() {
-  const { profile, addScenario, updateScenario, deleteScenario } = useStore();
+  const { profile, addScenario, updateScenario, deleteScenario, updateSettings } = useStore();
   const reportingCurrency = profile?.settings?.reportingCurrency || 'ZAR';
+
+  // Get UI preferences from settings
+  const uiPreferences = profile?.settings?.uiPreferences || {};
+  const scenariosPreferences = uiPreferences.scenarios || {};
+
+  // Helper to update scenarios preferences
+  const updateScenariosPreferences = (updates) => {
+    const currentPrefs = profile?.settings?.uiPreferences || {};
+    const currentScenariosPrefs = currentPrefs.scenarios || {};
+    updateSettings({
+      uiPreferences: {
+        ...currentPrefs,
+        scenarios: {
+          ...currentScenariosPrefs,
+          ...updates,
+        },
+      },
+    });
+  };
   const [isAdding, setIsAdding] = useState(false);
   const [editingScenario, setEditingScenario] = useState(null);
   const [selectedScenario, setSelectedScenario] = useState(null);
@@ -60,9 +79,10 @@ function Scenarios() {
       let total = 0;
       expenseCategories.forEach(category => {
         (category.subcategories || []).forEach(sub => {
+          // 'amount' field stores the value per frequency (monthly or annual)
           const monthlyAmountOriginal = sub.frequency === 'Annual'
-            ? (sub.monthlyAmount || 0) / 12
-            : (sub.monthlyAmount || 0);
+            ? (sub.amount || 0) / 12
+            : (sub.amount || 0);
           const currency = sub.currency || 'ZAR';
           const monthlyAmountZAR = toZAR(monthlyAmountOriginal, currency, exchangeRates);
           total += monthlyAmountZAR * 12;
@@ -79,6 +99,9 @@ function Scenarios() {
 
   const handleAdd = () => {
     const lifePhases = settings.lifePhases || {};
+    // Get saved currency movement defaults
+    const savedCurrencyMovement = scenariosPreferences.defaultCurrencyMovement || { USD: 0, EUR: 0, GBP: 0 };
+
     const newScenario = {
       ...createDefaultScenario(),
       retirementAge: settings.profile.retirementAge,
@@ -87,6 +110,8 @@ function Scenarios() {
       inflationRate: settings.profile.expectedInflation || settings.inflation || 4.5,
       // Copy expected returns from settings
       expectedReturns: { ...(settings.expectedReturns || createDefaultScenario().expectedReturns) },
+      // Pre-populate currency movement with saved defaults
+      currencyMovement: { ...savedCurrencyMovement },
       // Set up expense phases from life phases
       expensePhases: {
         working: {
@@ -183,6 +208,15 @@ function Scenarios() {
 
   // Add crash event
   const handleAddCrash = () => {
+    // Get saved asset class defaults for crashes
+    const savedCrashAssetClasses = scenariosPreferences.defaultCrashAssetClasses || ['Offshore Equity', 'SA Equity'];
+
+    // Build assetClassDrops from saved defaults (30% drop for each)
+    const assetClassDrops = {};
+    savedCrashAssetClasses.forEach(assetClass => {
+      assetClassDrops[assetClass] = 30;
+    });
+
     setFormData((prev) => ({
       ...prev,
       marketCrashes: [
@@ -190,11 +224,8 @@ function Scenarios() {
         {
           age: settings.profile.retirementAge,
           description: 'Market crash',
-          // Per-asset-class drop percentages (new format)
-          assetClassDrops: {
-            'Offshore Equity': 30,
-            'SA Equity': 30,
-          },
+          // Per-asset-class drop percentages (from saved defaults)
+          assetClassDrops,
         },
       ],
     }));
@@ -225,9 +256,8 @@ function Scenarios() {
 
   // Update drop percentage for a specific asset class in a crash
   const handleCrashAssetClassDrop = (index, assetClass, dropValue) => {
-    setFormData((prev) => ({
-      ...prev,
-      marketCrashes: prev.marketCrashes.map((crash, i) => {
+    setFormData((prev) => {
+      const newMarketCrashes = prev.marketCrashes.map((crash, i) => {
         if (i !== index) return crash;
         const currentDrops = crash.assetClassDrops || {};
         const dropPercentage = parseFloat(dropValue);
@@ -245,8 +275,26 @@ function Scenarios() {
             [assetClass]: dropPercentage,
           },
         };
-      }),
-    }));
+      });
+
+      // Update the form data
+      const updatedFormData = { ...prev, marketCrashes: newMarketCrashes };
+
+      // Save the asset classes that have values as defaults for future crashes
+      const crashAtIndex = newMarketCrashes[index];
+      if (crashAtIndex) {
+        const assetClassesWithValues = Object.keys(crashAtIndex.assetClassDrops || {}).filter(
+          ac => crashAtIndex.assetClassDrops[ac] > 0
+        );
+        if (assetClassesWithValues.length > 0) {
+          updateScenariosPreferences({
+            defaultCrashAssetClasses: assetClassesWithValues,
+          });
+        }
+      }
+
+      return updatedFormData;
+    });
   };
 
   // Add unexpected expense
@@ -475,8 +523,13 @@ function Scenarios() {
                         step="0.5"
                         value={formData.currencyMovement?.[currency] ?? 0}
                         onChange={(e) => {
-                          const newMovement = { ...formData.currencyMovement, [currency]: parseFloat(e.target.value) || 0 };
+                          const value = parseFloat(e.target.value) || 0;
+                          const newMovement = { ...formData.currencyMovement, [currency]: value };
                           handleChange('currencyMovement', newMovement);
+                          // Save as default for future scenarios
+                          updateScenariosPreferences({
+                            defaultCurrencyMovement: newMovement,
+                          });
                         }}
                       />
                       <span>% p.a.</span>

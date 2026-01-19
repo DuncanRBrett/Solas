@@ -1,6 +1,92 @@
 // Financial calculations for Solas v3
 
-import { getCurrencySymbol } from '../models/defaults';
+import { getCurrencySymbol, DEFAULT_EXCHANGE_RATES } from '../models/defaults';
+
+/**
+ * Track missing exchange rates encountered during calculations
+ * This allows us to report issues without breaking calculations
+ */
+const missingRatesWarnings = new Set();
+
+/**
+ * Clear the missing rates warning tracker
+ * Call this at the start of major calculation batches
+ */
+export const clearMissingRatesWarnings = () => {
+  missingRatesWarnings.clear();
+};
+
+/**
+ * Get all missing exchange rate warnings
+ * @returns {string[]} Array of missing currency codes
+ */
+export const getMissingRatesWarnings = () => {
+  return Array.from(missingRatesWarnings);
+};
+
+/**
+ * Check if there were any missing exchange rate warnings
+ * @returns {boolean} True if any rates were missing
+ */
+export const hasMissingRatesWarnings = () => {
+  return missingRatesWarnings.size > 0;
+};
+
+/**
+ * Validate that all required exchange rates are available
+ * @param {string[]} currencies - Array of currency codes to validate
+ * @param {string} reportingCurrency - The reporting currency (doesn't need a rate)
+ * @param {object} exchangeRates - Exchange rates object
+ * @returns {{ valid: boolean, missing: string[] }} Validation result
+ */
+export const validateExchangeRates = (currencies, reportingCurrency, exchangeRates) => {
+  const missing = [];
+
+  currencies.forEach(currency => {
+    if (currency !== reportingCurrency) {
+      const rate = exchangeRates[currency];
+      if (!rate || rate === 0 || isNaN(rate)) {
+        missing.push(currency);
+      }
+    }
+  });
+
+  return {
+    valid: missing.length === 0,
+    missing,
+  };
+};
+
+/**
+ * Get exchange rate with fallback to defaults
+ * This ensures calculations never silently use 1:1, but instead use reasonable defaults
+ *
+ * @param {string} currency - Currency to get rate for
+ * @param {object} exchangeRates - User's exchange rates
+ * @returns {{ rate: number, isDefault: boolean }} Rate and whether it's a default
+ */
+export const getExchangeRateWithFallback = (currency, exchangeRates) => {
+  const userRate = exchangeRates[currency];
+
+  if (userRate && userRate > 0 && !isNaN(userRate)) {
+    return { rate: userRate, isDefault: false };
+  }
+
+  // Try default rates
+  const defaultRate = DEFAULT_EXCHANGE_RATES[currency];
+  if (defaultRate && defaultRate > 0) {
+    // Track that we used a fallback
+    missingRatesWarnings.add(currency);
+    console.warn(`Exchange rate for ${currency} not configured, using default: ${defaultRate}`);
+    return { rate: defaultRate, isDefault: true };
+  }
+
+  // No rate available at all - this is a critical error
+  // Track it and return 1 as last resort (better than crashing)
+  missingRatesWarnings.add(currency);
+  console.error(`CRITICAL: No exchange rate for ${currency}, no default available. Using 1:1 (INACCURATE!)`);
+  return { rate: 1, isDefault: true };
+};
 
 /**
  * Convert any currency amount to the reporting currency
@@ -18,12 +104,7 @@ export const toReportingCurrency = (amount, fromCurrency, reportingCurrency, exc
   if (!amount || isNaN(amount)) return 0;
   if (fromCurrency === reportingCurrency) return amount;
 
-  const rate = exchangeRates[fromCurrency];
-  if (!rate || rate === 0) {
-    console.warn(`No exchange rate for ${fromCurrency}, using 1:1`);
-    return amount;
-  }
-
+  const { rate } = getExchangeRateWithFallback(fromCurrency, exchangeRates);
   return amount * rate;
 };
 
@@ -40,12 +121,7 @@ export const fromReportingCurrency = (amount, toCurrency, reportingCurrency, exc
   if (!amount || isNaN(amount)) return 0;
   if (toCurrency === reportingCurrency) return amount;
 
-  const rate = exchangeRates[toCurrency];
-  if (!rate || rate === 0) {
-    console.warn(`No exchange rate for ${toCurrency}, using 1:1`);
-    return amount;
-  }
-
+  const { rate } = getExchangeRateWithFallback(toCurrency, exchangeRates);
   return amount / rate;
 };
 
@@ -77,15 +153,26 @@ export const convertCurrency = (amount, fromCurrency, toCurrency, reportingCurre
  */
 export const toZAR = (amount, currency, legacyExchangeRates) => {
   if (currency === 'ZAR') return amount;
+  if (!amount || isNaN(amount)) return 0;
 
   // Handle legacy format: { 'USD/ZAR': 18.50 }
   const rate = legacyExchangeRates[`${currency}/ZAR`];
-  if (!rate) {
-    console.warn(`No exchange rate for ${currency}/ZAR`);
-    return amount;
+  if (rate && rate > 0 && !isNaN(rate)) {
+    return amount * rate;
   }
 
-  return amount * rate;
+  // Try default rates as fallback
+  const defaultRate = DEFAULT_EXCHANGE_RATES[currency];
+  if (defaultRate && defaultRate > 0) {
+    missingRatesWarnings.add(currency);
+    console.warn(`Exchange rate for ${currency}/ZAR not configured, using default: ${defaultRate}`);
+    return amount * defaultRate;
+  }
+
+  // Critical: no rate available
+  missingRatesWarnings.add(currency);
+  console.error(`CRITICAL: No exchange rate for ${currency}/ZAR, no default available. Using 1:1 (INACCURATE!)`);
+  return amount;
 };
 
 /**
@@ -94,14 +181,25 @@ export const toZAR = (amount, currency, legacyExchangeRates) => {
  */
 export const fromZAR = (amountZAR, targetCurrency, legacyExchangeRates) => {
   if (targetCurrency === 'ZAR') return amountZAR;
+  if (!amountZAR || isNaN(amountZAR)) return 0;
 
   const rate = legacyExchangeRates[`${targetCurrency}/ZAR`];
-  if (!rate || rate === 0) {
-    console.warn(`No exchange rate for ${targetCurrency}/ZAR`);
-    return amountZAR;
+  if (rate && rate > 0 && !isNaN(rate)) {
+    return amountZAR / rate;
   }
 
-  return amountZAR / rate;
+  // Try default rates as fallback
+  const defaultRate = DEFAULT_EXCHANGE_RATES[targetCurrency];
+  if (defaultRate && defaultRate > 0) {
+    missingRatesWarnings.add(targetCurrency);
+    console.warn(`Exchange rate for ${targetCurrency}/ZAR not configured, using default: ${defaultRate}`);
+    return amountZAR / defaultRate;
+  }
+
+  // Critical: no rate available
+  missingRatesWarnings.add(targetCurrency);
+  console.error(`CRITICAL: No exchange rate for ${targetCurrency}/ZAR, no default available. Using 1:1 (INACCURATE!)`);
+  return amountZAR;
 };
 
 /**

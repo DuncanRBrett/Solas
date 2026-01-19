@@ -20,6 +20,7 @@ import {
   exportSettingsToExcel,
   exportCompleteProfile,
   importAssetsFromExcel,
+  importAssetPricesFromExcel,
   importSettingsFromExcel,
 } from '../../utils/importExport';
 import { getExchangeRates, migrateLegacyExchangeRates } from '../../utils/calculations';
@@ -252,15 +253,33 @@ function Settings() {
     setLoadingMessage('Importing assets from Excel...');
 
     try {
-      const assets = await importAssetsFromExcel(file);
+      if (importMode === 'prices') {
+        // Update prices only mode
+        const existingAssets = [...(profile.assets || [])];
+        const result = await importAssetPricesFromExcel(file, existingAssets);
 
-      if (importMode === 'replace') {
-        setAssets(assets);
-        toast.success(`Successfully imported ${assets.length} assets (replaced existing)`);
+        if (result.updatedCount > 0) {
+          setAssets(result.updatedAssets);
+          let message = `Updated prices for ${result.updatedCount} asset${result.updatedCount === 1 ? '' : 's'}`;
+          if (result.notFoundNames.length > 0) {
+            message += `. ${result.notFoundNames.length} not matched: ${result.notFoundNames.slice(0, 3).join(', ')}${result.notFoundNames.length > 3 ? '...' : ''}`;
+          }
+          toast.success(message);
+        } else {
+          toast.warning('No matching assets found to update. Check that asset IDs or Names match.');
+        }
       } else {
-        // Merge mode - add to existing
-        assets.forEach(asset => addAsset(asset));
-        toast.success(`Successfully imported ${assets.length} assets (added to existing)`);
+        // Replace or merge mode
+        const assets = await importAssetsFromExcel(file);
+
+        if (importMode === 'replace') {
+          setAssets(assets);
+          toast.success(`Successfully imported ${assets.length} assets (replaced existing)`);
+        } else {
+          // Merge mode - add to existing
+          assets.forEach(asset => addAsset(asset));
+          toast.success(`Successfully imported ${assets.length} assets (added to existing)`);
+        }
       }
 
       // Reset file input
@@ -284,19 +303,30 @@ function Settings() {
     try {
       const importedSettings = await importSettingsFromExcel(file);
 
-      // Merge imported settings with current settings
+      // Merge imported settings with current settings using new structure
       const mergedSettings = {
         ...settings,
         profile: {
           ...settings.profile,
           ...importedSettings.profile,
         },
-        currency: {
-          ...settings.currency,
-          exchangeRates: {
-            ...settings.currency.exchangeRates,
-            ...importedSettings.currency?.exchangeRates,
-          },
+        // Use new format for exchange rates and reporting currency
+        reportingCurrency: importedSettings.reportingCurrency || settings.reportingCurrency,
+        exchangeRates: {
+          ...settings.exchangeRates,
+          ...importedSettings.exchangeRates,
+        },
+        expectedReturns: {
+          ...settings.expectedReturns,
+          ...importedSettings.expectedReturns,
+        },
+        targetAllocation: {
+          ...settings.targetAllocation,
+          ...importedSettings.targetAllocation,
+        },
+        thresholds: {
+          ...settings.thresholds,
+          ...importedSettings.thresholds,
         },
         withdrawalRates: {
           ...settings.withdrawalRates,
@@ -387,7 +417,13 @@ function Settings() {
               >
                 <option value="replace">Replace all assets</option>
                 <option value="merge">Add to existing assets</option>
+                <option value="prices">Update prices only (match by ID or Name)</option>
               </select>
+              {importMode === 'prices' && (
+                <small style={{ display: 'block', marginTop: '0.5rem', color: 'var(--color-text-secondary)' }}>
+                  Only updates Current Price and Last Updated for matching assets. Other fields remain unchanged.
+                </small>
+              )}
             </div>
 
             <div className="button-group">

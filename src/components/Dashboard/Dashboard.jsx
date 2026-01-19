@@ -10,6 +10,7 @@ import {
   toReportingCurrency,
   calculateAllocation,
 } from '../../utils/calculations';
+import { DEFAULT_SETTINGS, DEFAULT_EXCHANGE_RATES } from '../../models/defaults';
 import AllocationCharts from './AllocationCharts';
 import PortfolioQualityCard from './PortfolioQualityCard';
 import CapitalGainsCard from './CapitalGainsCard';
@@ -18,27 +19,28 @@ import './Dashboard.css';
 function Dashboard() {
   const { profile, addSnapshot } = useStore();
 
-  const stats = useMemo(() => {
-    const { assets = [], liabilities = [], settings } = profile || {};
-    const reportingCurrency = settings?.reportingCurrency || 'ZAR';
-    const exchangeRates = getExchangeRates(settings);
+  // Extract commonly used values (stable references)
+  const { assets = [], liabilities = [], settings = DEFAULT_SETTINGS } = profile ?? {};
+  const reportingCurrency = settings?.reportingCurrency ?? DEFAULT_SETTINGS.reportingCurrency;
+  const exchangeRates = getExchangeRates(settings);
+  const withdrawalRates = settings?.withdrawalRates ?? DEFAULT_SETTINGS.withdrawalRates;
+  const annualExpenses = settings?.profile?.annualExpenses ?? DEFAULT_SETTINGS.profile.annualExpenses;
+  const marginalTaxRate = settings?.profile?.marginalTaxRate ?? DEFAULT_SETTINGS.profile.marginalTaxRate;
 
-    // Provide defaults if withdrawalRates doesn't exist
-    const withdrawalRates = settings?.withdrawalRates || {
-      conservative: 3.0,
-      safe: 4.0,
-      aggressive: 5.0,
-    };
-    const { annualExpenses = 0 } = settings?.profile || {};
+  // Helper for formatting in reporting currency (memoized for stable reference)
+  const fmt = useMemo(
+    () => (amount, decimals = 0) => formatInReportingCurrency(amount, decimals, reportingCurrency),
+    [reportingCurrency]
+  );
 
-    // Helper for formatting in reporting currency
-    const fmt = (amount, decimals = 0) => formatInReportingCurrency(amount, decimals, reportingCurrency);
+  // Helper to convert to reporting currency
+  const toReporting = useMemo(
+    () => (amount, currency) => toReportingCurrency(amount, currency, reportingCurrency, exchangeRates),
+    [reportingCurrency, exchangeRates]
+  );
 
-    // Helper to convert to reporting currency
-    const toReporting = (amount, currency) =>
-      toReportingCurrency(amount, currency, reportingCurrency, exchangeRates);
-
-    // Calculate asset values in reporting currency
+  // 1. Calculate asset values (depends on assets and settings)
+  const assetValues = useMemo(() => {
     const grossAssets = assets.reduce(
       (total, asset) => total + calculateAssetValue(asset, settings),
       0
@@ -49,15 +51,36 @@ function Dashboard() {
     const nonInvestibleAssets = assets
       .filter(a => a.assetType === 'Non-Investible')
       .reduce((total, asset) => total + calculateAssetValue(asset, settings), 0);
+
+    return { grossAssets, investibleAssets, nonInvestibleAssets, assetCount: assets.length };
+  }, [assets, settings]);
+
+  // 2. Calculate liability totals (depends on liabilities and currency conversion)
+  const liabilityValues = useMemo(() => {
     const totalLiabilities = liabilities.reduce(
       (total, l) => total + toReporting(l.principal, l.currency),
       0
     );
-    const netWorth = grossAssets - totalLiabilities;
+    return { totalLiabilities, liabilityCount: liabilities.length };
+  }, [liabilities, toReporting]);
 
-    // Calculate CGT liability and realisable net worth
-    const marginalTaxRate = settings.profile?.marginalTaxRate || 45; // Stored as percentage
-    let totalCGT = 0;
+  // 3. Calculate net worth (derived from asset and liability values)
+  const netWorthValues = useMemo(() => {
+    const netWorth = assetValues.grossAssets - liabilityValues.totalLiabilities;
+
+    // Calculate net worth in other currencies
+    const netWorthInOtherCurrencies = {};
+    Object.keys(exchangeRates).forEach(currency => {
+      if (currency !== reportingCurrency) {
+        netWorthInOtherCurrencies[currency] = netWorth / exchangeRates[currency];
+      }
+    });
+
+    return { netWorth, netWorthInOtherCurrencies };
+  }, [assetValues.grossAssets, liabilityValues.totalLiabilities, exchangeRates, reportingCurrency]);
+
+  // 4. Calculate CGT liability (depends on assets and marginal tax rate)
+  const cgtValues = useMemo(() => {
     let taxableGain = 0;
 
     assets.forEach(asset => {
@@ -76,67 +99,60 @@ function Dashboard() {
     });
 
     // CGT: 40% inclusion rate × marginal tax rate
-    totalCGT = taxableGain * 0.40 * (marginalTaxRate / 100); // Convert percentage to decimal
+    const totalCGT = taxableGain * 0.40 * (marginalTaxRate / 100);
+    const realisableNetWorth = netWorthValues.netWorth - totalCGT;
 
-    // Realisable Net Worth = Net Worth - CGT Liability
-    const realisableNetWorth = netWorth - totalCGT;
+    return { totalCGT, realisableNetWorth };
+  }, [assets, settings, marginalTaxRate, netWorthValues.netWorth, toReporting]);
 
-    // Calculate net worth in other currencies
-    const netWorthInOtherCurrencies = {};
-    Object.keys(exchangeRates).forEach(currency => {
-      if (currency !== reportingCurrency) {
-        netWorthInOtherCurrencies[currency] = netWorth / exchangeRates[currency];
-      }
-    });
+  // 5. Calculate withdrawal strategies (depends on investible assets and withdrawal rates)
+  const withdrawals = useMemo(() => {
+    const conservative = calculateSafeWithdrawal(assetValues.investibleAssets, withdrawalRates.conservative);
+    const safe = calculateSafeWithdrawal(assetValues.investibleAssets, withdrawalRates.safe);
+    const aggressive = calculateSafeWithdrawal(assetValues.investibleAssets, withdrawalRates.aggressive);
 
-    // Calculate withdrawal amounts for each strategy
-    const conservative = calculateSafeWithdrawal(investibleAssets, withdrawalRates.conservative);
-    const safe = calculateSafeWithdrawal(investibleAssets, withdrawalRates.safe);
-    const aggressive = calculateSafeWithdrawal(investibleAssets, withdrawalRates.aggressive);
-
-    // Calculate required capital for each strategy
     const requiredConservative = annualExpenses > 0 ? (annualExpenses / withdrawalRates.conservative) * 100 : 0;
     const requiredSafe = annualExpenses > 0 ? (annualExpenses / withdrawalRates.safe) * 100 : 0;
     const requiredAggressive = annualExpenses > 0 ? (annualExpenses / withdrawalRates.aggressive) * 100 : 0;
 
+    return {
+      conservative: { amount: conservative, rate: withdrawalRates.conservative, required: requiredConservative },
+      safe: { amount: safe, rate: withdrawalRates.safe, required: requiredSafe },
+      aggressive: { amount: aggressive, rate: withdrawalRates.aggressive, required: requiredAggressive },
+    };
+  }, [assetValues.investibleAssets, withdrawalRates, annualExpenses]);
+
+  // 6. Calculate concentration risks (depends on assets and thresholds)
+  const risks = useMemo(() => {
     // For concentration risks, we need the legacy format temporarily
     // TODO: Update detectConcentrationRisks to use new format
-    const legacyExchangeRates = settings.currency?.exchangeRates || {
-      'USD/ZAR': exchangeRates.USD || 18.5,
-      'EUR/ZAR': exchangeRates.EUR || 19.8,
-      'GBP/ZAR': exchangeRates.GBP || 23.2,
+    const legacyExchangeRates = settings?.currency?.exchangeRates ?? {
+      'USD/ZAR': exchangeRates.USD ?? DEFAULT_EXCHANGE_RATES.USD,
+      'EUR/ZAR': exchangeRates.EUR ?? DEFAULT_EXCHANGE_RATES.EUR,
+      'GBP/ZAR': exchangeRates.GBP ?? DEFAULT_EXCHANGE_RATES.GBP,
     };
-    const risks = detectConcentrationRisks(assets, legacyExchangeRates, settings.thresholds);
+    return detectConcentrationRisks(assets, legacyExchangeRates, settings?.thresholds ?? DEFAULT_SETTINGS.thresholds);
+  }, [assets, settings, exchangeRates]);
 
-    return {
-      grossAssets,
-      investibleAssets,
-      nonInvestibleAssets,
-      totalLiabilities,
-      netWorth,
-      totalCGT,
-      realisableNetWorth,
-      netWorthInOtherCurrencies,
-      annualExpenses,
-      withdrawalRates,
-      reportingCurrency,
-      exchangeRates,
-      fmt,
-      withdrawals: {
-        conservative: { amount: conservative, rate: withdrawalRates.conservative, required: requiredConservative },
-        safe: { amount: safe, rate: withdrawalRates.safe, required: requiredSafe },
-        aggressive: { amount: aggressive, rate: withdrawalRates.aggressive, required: requiredAggressive },
-      },
-      risks,
-      assetCount: assets.length,
-      liabilityCount: liabilities.length,
-    };
-  }, [profile]);
+  // Combine all stats for easy access in JSX
+  const stats = useMemo(() => ({
+    ...assetValues,
+    ...liabilityValues,
+    ...netWorthValues,
+    ...cgtValues,
+    annualExpenses,
+    withdrawalRates,
+    reportingCurrency,
+    exchangeRates,
+    fmt,
+    withdrawals,
+    risks,
+  }), [assetValues, liabilityValues, netWorthValues, cgtValues, annualExpenses, withdrawalRates, reportingCurrency, exchangeRates, fmt, withdrawals, risks]);
 
   // Save current stats to history
   const handleSaveToHistory = () => {
-    const { assets = [], settings } = profile || {};
-    const reportingCurrency = settings?.reportingCurrency || 'ZAR';
+    const { assets = [], settings = DEFAULT_SETTINGS } = profile ?? {};
+    const reportingCurrency = settings?.reportingCurrency ?? DEFAULT_SETTINGS.reportingCurrency;
     const exchangeRates = getExchangeRates(settings);
 
     // Build legacy exchange rates format for calculateAllocation

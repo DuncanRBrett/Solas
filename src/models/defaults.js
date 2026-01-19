@@ -122,6 +122,27 @@ export const DEFAULT_SETTINGS = {
 
   inflation: 4.5, // % p.a.
 
+  // UI Preferences (persisted across sessions)
+  uiPreferences: {
+    // Fees page settings
+    fees: {
+      projectionYears: 30,
+      inflationRate: 5.0,
+      portfolioGrowthRate: 9.0,
+    },
+    // Scenarios page defaults for new scenarios
+    scenarios: {
+      // Default currency movement values when adding new scenarios
+      defaultCurrencyMovement: {
+        USD: 0,
+        EUR: 0,
+        GBP: 0,
+      },
+      // Default asset classes to include in market crashes
+      defaultCrashAssetClasses: ['Offshore Equity', 'SA Equity'],
+    },
+  },
+
   // Portfolio quality assessment thresholds
   qualityThresholds: {
     diversification: {
@@ -311,8 +332,10 @@ export const createDefaultAsset = () => ({
   costPrice: 0,
 
   // Income yields (manual entry)
-  dividendYield: 0, // % - Dividend yield (after 20% dividend withholding tax)
-  interestYield: 0, // % - Interest yield (taxed as income at marginal rate)
+  // IMPORTANT: Enter NET yields (after tax withheld at source)
+  dividendYield: 0, // % - NET dividend yield (after 20% withholding tax is deducted at source)
+                    //     If a fund shows 5% gross dividend yield, enter 4% (5% × 0.80)
+  interestYield: 0, // % - Interest yield (will be taxed as income at your marginal rate)
   expectedReturn: null, // % p.a. - Override default expected return for this asset (null = use asset class default)
 
   // Fees (Total Expense Ratio / Total Investment Cost)
@@ -386,9 +409,12 @@ export const createDefaultExpenseCategory = () => ({
 export const createDefaultExpenseSubcategory = () => ({
   id: crypto.randomUUID(),
   name: '',
-  monthlyAmount: 0,
+  // Amount per frequency period:
+  // - If frequency = 'Monthly', this is the monthly amount
+  // - If frequency = 'Annual', this is the annual amount
+  amount: 0,
   currency: 'ZAR', // ZAR, USD, GBP, EUR
-  frequency: 'Monthly', // Monthly or Annual
+  frequency: 'Monthly', // Monthly or Annual (determines how to interpret amount)
   expenseType: 'Variable Discretionary', // Fixed Non-Discretionary, Variable Discretionary, Luxury, Wealth Building
   notes: '',
 });

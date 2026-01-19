@@ -81,9 +81,10 @@ function ExpensesV2() {
 
       category.subcategories.forEach((sub) => {
         // Convert to monthly equivalent in original currency
+        // 'amount' field stores the value per frequency (monthly or annual)
         const monthlyAmountOriginal = sub.frequency === 'Annual'
-          ? (sub.monthlyAmount || 0) / 12
-          : (sub.monthlyAmount || 0);
+          ? (sub.amount || 0) / 12
+          : (sub.amount || 0);
 
         // Convert to reporting currency for totals
         const currency = sub.currency || reportingCurrency;
@@ -445,9 +446,10 @@ function ExpensesV2() {
                     <tbody>
                       {category.subcategories.map((subcategory) => {
                         const subCurrency = subcategory.currency || reportingCurrency;
+                        // 'amount' field stores the value per frequency (monthly or annual)
                         const monthlyEquivOriginal = subcategory.frequency === 'Annual'
-                          ? (subcategory.monthlyAmount || 0) / 12
-                          : (subcategory.monthlyAmount || 0);
+                          ? (subcategory.amount || 0) / 12
+                          : (subcategory.amount || 0);
 
                         // Convert to reporting currency for totals
                         const monthlyEquivConverted = toReporting(monthlyEquivOriginal, subCurrency);
@@ -479,7 +481,7 @@ function ExpensesV2() {
                                 {subCurrency}
                               </span>
                             </td>
-                            <td>{formatCurrency(subcategory.monthlyAmount || 0, 0, subCurrency)}</td>
+                            <td>{formatCurrency(subcategory.amount || 0, 0, subCurrency)}</td>
                             <td>{fmt(monthlyEquivConverted)}</td>
                             <td>{fmt(monthlyEquivConverted * 12)}</td>
                             <td>{subPct.toFixed(1)}%</td>
@@ -634,11 +636,11 @@ function ExpensesV2() {
                 <input
                   type="number"
                   step="100"
-                  value={subcategoryFormData.monthlyAmount || ''}
+                  value={subcategoryFormData.amount || ''}
                   onChange={(e) =>
                     setSubcategoryFormData({
                       ...subcategoryFormData,
-                      monthlyAmount: parseFloat(e.target.value) || 0,
+                      amount: parseFloat(e.target.value) || 0,
                     })
                   }
                   placeholder="0"

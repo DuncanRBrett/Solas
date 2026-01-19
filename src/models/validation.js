@@ -386,9 +386,10 @@ export const ExpenseSubcategorySchema = z.object({
     .min(1, 'Subcategory name is required')
     .max(100, 'Subcategory name too long (max 100 characters)'),
 
-  monthlyAmount: NonNegativeNumberSchema.refine(
+  // Amount per frequency period (monthly or annual depending on frequency field)
+  amount: NonNegativeNumberSchema.refine(
     val => val < 1e10,
-    'Monthly amount is unreasonably large'
+    'Amount is unreasonably large'
   ),
 
   currency: CurrencySchema,
@@ -817,4 +818,113 @@ export function formatValidationErrors(errors) {
   }
 
   return `Multiple validation errors:\n• ${errors.join('\n• ')}`;
+}
+
+// =============================================================================
+// Cross-reference validation helpers
+// =============================================================================
+
+/**
+ * Validate that an asset's platform exists in settings
+ * @param {object} asset - Asset to validate
+ * @param {object} settings - Settings object containing platforms
+ * @returns {{ valid: boolean, warning?: string }}
+ */
+export function validateAssetPlatform(asset, settings) {
+  // Empty platform is valid (not all assets need a platform)
+  if (!asset.platform || asset.platform.trim() === '') {
+    return { valid: true };
+  }
+
+  // Get available platforms from settings, or use defaults
+  const availablePlatforms = settings?.platforms ?? [];
+
+  // If no platforms configured, allow any platform
+  if (availablePlatforms.length === 0) {
+    return { valid: true };
+  }
+
+  // Check if platform exists (case-insensitive match)
+  const platformLower = asset.platform.toLowerCase().trim();
+  const platformExists = availablePlatforms.some(
+    p => (typeof p === 'string' ? p : p.name)?.toLowerCase().trim() === platformLower
+  );
+
+  if (!platformExists) {
+    return {
+      valid: false,
+      warning: `Platform "${asset.platform}" is not in your configured platforms list. ` +
+               `Consider adding it in Settings → Platforms, or use one of: ${availablePlatforms.slice(0, 5).map(p => typeof p === 'string' ? p : p.name).join(', ')}${availablePlatforms.length > 5 ? '...' : ''}`
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate that expense category names are unique
+ * @param {Array} categories - Array of expense categories
+ * @returns {{ valid: boolean, duplicates?: string[] }}
+ */
+export function validateExpenseCategoryUniqueness(categories) {
+  if (!categories || categories.length === 0) {
+    return { valid: true };
+  }
+
+  const names = categories.map(c => c.name?.toLowerCase().trim()).filter(Boolean);
+  const seen = new Set();
+  const duplicates = [];
+
+  names.forEach(name => {
+    if (seen.has(name)) {
+      if (!duplicates.includes(name)) {
+        duplicates.push(name);
+      }
+    } else {
+      seen.add(name);
+    }
+  });
+
+  if (duplicates.length > 0) {
+    return {
+      valid: false,
+      duplicates: duplicates.map(d => categories.find(c => c.name?.toLowerCase().trim() === d)?.name || d)
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate that expense subcategory names are unique within their category
+ * @param {object} category - Expense category with subcategories
+ * @returns {{ valid: boolean, duplicates?: string[] }}
+ */
+export function validateSubcategoryUniqueness(category) {
+  if (!category?.subcategories || category.subcategories.length === 0) {
+    return { valid: true };
+  }
+
+  const names = category.subcategories.map(s => s.name?.toLowerCase().trim()).filter(Boolean);
+  const seen = new Set();
+  const duplicates = [];
+
+  names.forEach(name => {
+    if (seen.has(name)) {
+      if (!duplicates.includes(name)) {
+        duplicates.push(name);
+      }
+    } else {
+      seen.add(name);
+    }
+  });
+
+  if (duplicates.length > 0) {
+    return {
+      valid: false,
+      duplicates: duplicates.map(d => category.subcategories.find(s => s.name?.toLowerCase().trim() === d)?.name || d)
+    };
+  }
+
+  return { valid: true };
 }

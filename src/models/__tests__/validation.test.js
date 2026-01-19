@@ -246,7 +246,7 @@ describe('ExpenseSchema', () => {
   it('validates expense subcategory', () => {
     const subcategory = createDefaultExpenseSubcategory();
     subcategory.name = 'Groceries';
-    subcategory.monthlyAmount = 5000;
+    subcategory.amount = 5000;
 
     const result = validateData(ExpenseSubcategorySchema, subcategory);
     expect(result.success).toBe(true);
@@ -259,7 +259,7 @@ describe('ExpenseSchema', () => {
       {
         id: crypto.randomUUID(),
         name: 'Groceries',
-        monthlyAmount: 5000,
+        amount: 5000,
         currency: 'ZAR',
         frequency: 'Monthly',
         expenseType: 'Fixed Non-Discretionary',
