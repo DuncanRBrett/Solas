@@ -7,6 +7,7 @@ import {
   groupAssets,
   calculateGrossAssets,
   detectConcentrationRisks,
+  getExchangeRates,
 } from '../utils/calculations';
 import { ASSET_CLASSES } from '../models/defaults';
 
@@ -59,7 +60,7 @@ export const calculateIndividualAssetHHI = (assets, exchangeRates) => {
  * @returns {object} Diversification score and breakdown
  */
 export const calculateDiversificationScore = (assets, settings) => {
-  const exchangeRates = settings.currency?.exchangeRates || {};
+  const exchangeRates = getExchangeRates(settings);
   const investibleAssets = assets.filter((a) => a.assetType === 'Investible');
 
   if (investibleAssets.length === 0) {
@@ -164,7 +165,7 @@ const getDiversificationDetails = (assetClassHHI, currencyHHI, regionHHI, indivi
  * @returns {object} Balance score and drift details
  */
 export const calculateBalanceScore = (assets, settings) => {
-  const exchangeRates = settings.currency?.exchangeRates || {};
+  const exchangeRates = getExchangeRates(settings);
   const { targetAllocation, thresholds } = settings;
   const driftThreshold = thresholds?.rebalancingDrift || 5;
 
@@ -254,7 +255,7 @@ const getBalanceDetails = (urgency, maxDrift, threshold) => {
  * @returns {object} Resilience score and breakdown
  */
 export const calculateResilienceScore = (assets, settings) => {
-  const exchangeRates = settings.currency?.exchangeRates || {};
+  const exchangeRates = getExchangeRates(settings);
   const investibleAssets = assets.filter((a) => a.assetType === 'Investible');
   const total = calculateGrossAssets(investibleAssets, exchangeRates);
 
@@ -268,10 +269,18 @@ export const calculateResilienceScore = (assets, settings) => {
     };
   }
 
-  // 1. Liquidity Ratio (exclude Property and Crypto as illiquid)
-  const liquidAssets = investibleAssets.filter(
-    (a) => a.assetClass !== 'Property' && a.assetClass !== 'Crypto'
-  );
+  // 1. Liquidity Ratio - Patch 8: Use isLiquid property instead of hardcoded asset class filtering
+  // If isLiquid is not explicitly set to false, default to liquid (backward compatible)
+  // Legacy fallback: Property and Crypto default to illiquid if isLiquid is undefined
+  const liquidAssets = investibleAssets.filter((a) => {
+    // Explicit isLiquid value takes precedence
+    if (a.isLiquid === false) return false;
+    if (a.isLiquid === true) return true;
+    // Backward compatibility: Property and Crypto are illiquid by default
+    if (a.assetClass === 'Property' || a.assetClass === 'Crypto') return false;
+    // All other assets are liquid by default
+    return true;
+  });
   const liquidValue = calculateGrossAssets(liquidAssets, exchangeRates);
   const liquidityRatio = liquidValue / total;
 
@@ -339,7 +348,7 @@ const getResilienceDetails = (liquidityRatio, defensiveRatio, emergencyMonths) =
  * @returns {object} Risk score and concentration details
  */
 export const calculateRiskScore = (assets, settings) => {
-  const exchangeRates = settings.currency?.exchangeRates || {};
+  const exchangeRates = getExchangeRates(settings);
   const { thresholds } = settings;
 
   const investibleAssets = assets.filter((a) => a.assetType === 'Investible');

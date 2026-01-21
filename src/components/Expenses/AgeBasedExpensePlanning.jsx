@@ -142,9 +142,19 @@ function AgeBasedExpensePlanning({ onClose }) {
       return migratedPhases.slice(0, 4);
     }
 
-    // Use existing new format or create default
-    if (ageBasedExpensePlan?.phases?.length === 4 && ageBasedExpensePlan.phases[0]?.categoryExpenses !== undefined) {
-      return ageBasedExpensePlan.phases;
+    // Use existing new format if it has phases with categoryExpenses
+    // Check that phases exist and have the right structure (don't require exactly 4 phases)
+    if (ageBasedExpensePlan?.phases?.length > 0) {
+      const firstPhaseHasCategoryExpenses = ageBasedExpensePlan.phases[0]?.categoryExpenses !== undefined;
+      if (firstPhaseHasCategoryExpenses) {
+        // Ensure we have exactly 4 phases by padding with defaults if needed
+        const existingPhases = [...ageBasedExpensePlan.phases];
+        const defaultPhases = createDefaultPhases();
+        while (existingPhases.length < 4) {
+          existingPhases.push(defaultPhases[existingPhases.length]);
+        }
+        return existingPhases.slice(0, 4);
+      }
     }
 
     return createDefaultPhases();

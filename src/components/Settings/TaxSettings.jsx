@@ -412,11 +412,24 @@ function TaxSettings() {
         </div>
       </div>
 
+      {/* Actions - moved above Tax Calculator */}
+      <div className="settings-actions">
+        <button className="btn-secondary" onClick={handleResetToDefaults}>
+          Reset to SA 2025/2026 Defaults
+        </button>
+        <button className="btn-primary" onClick={handleSave}>
+          Save Tax Settings
+        </button>
+      </div>
+
       {/* Tax Calculator Test */}
       <div className="card settings-section tax-calculator">
         <h3>Tax Calculator</h3>
         <p className="info-text">
           Test the tax calculation with different income levels.
+        </p>
+        <p className="warning-text" style={{ color: '#e67e22', fontWeight: 'bold', marginTop: '0.5rem' }}>
+          ⚠️ This table is for illustration only and settings are not saved
         </p>
 
         <div className="form-grid">
@@ -476,16 +489,6 @@ function TaxSettings() {
             <span>{formatCurrency(taxResult.monthlyTakeHome)}</span>
           </div>
         </div>
-      </div>
-
-      {/* Actions */}
-      <div className="settings-actions">
-        <button className="btn-secondary" onClick={handleResetToDefaults}>
-          Reset to SA 2025/2026 Defaults
-        </button>
-        <button className="btn-primary" onClick={handleSave}>
-          Save Tax Settings
-        </button>
       </div>
     </div>
   );

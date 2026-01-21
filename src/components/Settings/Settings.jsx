@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import useStore from '../../store/useStore';
 import { useConfirmDialog } from '../shared/ConfirmDialog';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import FeesSettings from './FeesSettings';
 import TaxSettings from './TaxSettings';
+import { debounce } from '../../utils/debounce';
 import {
   ALL_CURRENCIES,
   DEFAULT_PLATFORMS,
@@ -22,12 +23,13 @@ import {
   importAssetsFromExcel,
   importAssetPricesFromExcel,
   importSettingsFromExcel,
+  importCompleteProfileFromExcel,
 } from '../../utils/importExport';
 import { getExchangeRates, migrateLegacyExchangeRates } from '../../utils/calculations';
 import './Settings.css';
 
 function Settings() {
-  const { profile, updateSettings, setAssets, addAsset, deleteProfile, profiles } = useStore();
+  const { profile, updateSettings, setAssets, addAsset, deleteProfile, profiles, replaceProfileData } = useStore();
   const { confirmDialog, showConfirm } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState('general'); // 'general' or 'fees'
 
@@ -68,6 +70,73 @@ function Settings() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const assetsFileInputRef = useRef(null);
   const settingsFileInputRef = useRef(null);
+  const profileFileInputRef = useRef(null);
+
+  // Sync local settings state when switching profiles
+  // This ensures the UI reflects the correct profile's settings when user switches profiles
+  useEffect(() => {
+    if (profile?.settings) {
+      const storeSettings = profile.settings;
+      const storeMigratedExchangeRates = storeSettings.exchangeRates && !storeSettings.exchangeRates['USD/ZAR']
+        ? storeSettings.exchangeRates
+        : storeSettings.currency?.exchangeRates
+          ? migrateLegacyExchangeRates(storeSettings.currency.exchangeRates, storeSettings.reportingCurrency || 'ZAR')
+          : DEFAULT_EXCHANGE_RATES;
+
+      setSettings({
+        ...storeSettings,
+        profile: {
+          ...DEFAULT_SETTINGS.profile,
+          ...storeSettings.profile,
+        },
+        withdrawalRates: storeSettings.withdrawalRates || {
+          conservative: 3.0,
+          safe: 4.0,
+          aggressive: 5.0,
+        },
+        targetAllocation: storeSettings.targetAllocation || DEFAULT_SETTINGS.targetAllocation,
+        expectedReturns: storeSettings.expectedReturns || DEFAULT_SETTINGS.expectedReturns,
+        thresholds: storeSettings.thresholds || DEFAULT_SETTINGS.thresholds,
+        platforms: storeSettings.platforms || DEFAULT_PLATFORMS,
+        enabledCurrencies: storeSettings.enabledCurrencies || DEFAULT_ENABLED_CURRENCIES,
+        exchangeRates: storeMigratedExchangeRates,
+        reportingCurrency: storeSettings.reportingCurrency || 'ZAR',
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.name]); // Only re-sync when profile name changes (i.e., profile switch)
+
+  // Track if this is the initial mount to avoid saving on first render
+  const isInitialMount = useRef(true);
+
+  // Store the debounced save function in a ref so it persists across renders
+  const debouncedSaveRef = useRef(null);
+
+  // Initialize the debounced function once
+  if (!debouncedSaveRef.current) {
+    debouncedSaveRef.current = debounce((settingsToSave) => {
+      // Get the latest updateSettings from the store
+      const { updateSettings: latestUpdateSettings } = useStore.getState();
+      latestUpdateSettings(settingsToSave);
+    }, 1000);
+  }
+
+  // Auto-save effect - saves settings 1 second after last change
+  useEffect(() => {
+    // Skip the initial mount to avoid saving default/loaded values immediately
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Auto-save settings after a delay
+    debouncedSaveRef.current(settings);
+
+    // Cleanup: FLUSH pending save on unmount (don't cancel - that loses changes!)
+    return () => {
+      debouncedSaveRef.current?.flush?.();
+    };
+  }, [settings]);
 
   const handleSave = () => {
     updateSettings(settings);
@@ -303,7 +372,7 @@ function Settings() {
     try {
       const importedSettings = await importSettingsFromExcel(file);
 
-      // Merge imported settings with current settings using new structure
+      // Merge imported settings with current settings using new structure - include ALL fields
       const mergedSettings = {
         ...settings,
         profile: {
@@ -332,6 +401,15 @@ function Settings() {
           ...settings.withdrawalRates,
           ...importedSettings.withdrawalRates,
         },
+        // Include life phases and expense phases if present
+        lifePhases: importedSettings.lifePhases && Object.keys(importedSettings.lifePhases).length > 0
+          ? { ...settings.lifePhases, ...importedSettings.lifePhases }
+          : settings.lifePhases,
+        retirementExpensePhases: importedSettings.retirementExpensePhases && Object.keys(importedSettings.retirementExpensePhases).length > 0
+          ? { ...settings.retirementExpensePhases, ...importedSettings.retirementExpensePhases }
+          : settings.retirementExpensePhases,
+        // Include inflation if present
+        inflation: importedSettings.inflation ?? settings.inflation,
       };
 
       setSettings(mergedSettings);
@@ -342,6 +420,116 @@ function Settings() {
       e.target.value = '';
     } catch (error) {
       toast.error('Error importing settings: ' + error.message);
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleImportProfile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsLoading(true);
+    setLoadingMessage('Importing complete profile from Excel...');
+
+    try {
+      const importedData = await importCompleteProfileFromExcel(file);
+
+      // Build the complete merged settings
+      const importedSettings = importedData.settings;
+      const mergedSettings = {
+        ...settings,
+        profile: {
+          ...settings.profile,
+          ...importedSettings.profile,
+        },
+        reportingCurrency: importedSettings.reportingCurrency || settings.reportingCurrency,
+        exchangeRates: Object.keys(importedSettings.exchangeRates || {}).length > 0
+          ? importedSettings.exchangeRates
+          : settings.exchangeRates,
+        enabledCurrencies: importedSettings.enabledCurrencies?.length > 0
+          ? importedSettings.enabledCurrencies
+          : settings.enabledCurrencies,
+        expectedReturns: Object.keys(importedSettings.expectedReturns || {}).length > 0
+          ? importedSettings.expectedReturns
+          : settings.expectedReturns,
+        targetAllocation: Object.keys(importedSettings.targetAllocation || {}).length > 0
+          ? importedSettings.targetAllocation
+          : settings.targetAllocation,
+        thresholds: Object.keys(importedSettings.thresholds || {}).length > 0
+          ? importedSettings.thresholds
+          : settings.thresholds,
+        withdrawalRates: Object.keys(importedSettings.withdrawalRates || {}).length > 0
+          ? importedSettings.withdrawalRates
+          : settings.withdrawalRates,
+        lifePhases: Object.keys(importedSettings.lifePhases || {}).length > 0
+          ? importedSettings.lifePhases
+          : settings.lifePhases,
+        platforms: importedSettings.platforms?.length > 0
+          ? importedSettings.platforms
+          : settings.platforms,
+        inflation: importedSettings.inflation ?? settings.inflation,
+      };
+
+      // Update local settings state
+      setSettings(mergedSettings);
+
+      // Use replaceProfileData to update ALL profile data at once
+      // This includes assets, liabilities, income, expenses, scenarios, and settings
+      const profileUpdate = {
+        settings: mergedSettings,
+      };
+
+      // Only include arrays if they have data
+      if (importedData.assets?.length > 0) {
+        profileUpdate.assets = importedData.assets;
+      }
+      if (importedData.liabilities?.length > 0) {
+        profileUpdate.liabilities = importedData.liabilities;
+      }
+      if (importedData.income?.length > 0) {
+        profileUpdate.income = importedData.income;
+      }
+      if (importedData.expenses?.length > 0) {
+        profileUpdate.expenses = importedData.expenses;
+      }
+      if (importedData.expenseCategories?.length > 0) {
+        profileUpdate.expenseCategories = importedData.expenseCategories;
+      }
+      if (importedData.scenarios?.length > 0) {
+        profileUpdate.scenarios = importedData.scenarios;
+      }
+      if (importedData.history?.length > 0) {
+        profileUpdate.history = importedData.history;
+      }
+      // Include ageBasedExpensePlan if present (critical for expense planning)
+      if (importedData.ageBasedExpensePlan) {
+        profileUpdate.ageBasedExpensePlan = importedData.ageBasedExpensePlan;
+      }
+
+      // Save everything to the store
+      replaceProfileData(profileUpdate);
+
+      // Build summary message
+      const counts = [];
+      if (importedData.assets?.length > 0) counts.push(`${importedData.assets.length} assets`);
+      if (importedData.liabilities?.length > 0) counts.push(`${importedData.liabilities.length} liabilities`);
+      if (importedData.income?.length > 0) counts.push(`${importedData.income.length} income sources`);
+      if (importedData.expenses?.length > 0) counts.push(`${importedData.expenses.length} expenses`);
+      if (importedData.expenseCategories?.length > 0) counts.push(`${importedData.expenseCategories.length} expense categories`);
+      if (importedData.scenarios?.length > 0) counts.push(`${importedData.scenarios.length} scenarios`);
+      if (importedData.history?.length > 0) counts.push(`${importedData.history.length} history snapshots`);
+      if (importedData.ageBasedExpensePlan) counts.push('age-based expense plan');
+
+      const summary = counts.length > 0 ? counts.join(', ') : 'settings';
+      toast.success(`Profile imported successfully! Loaded: ${summary}`);
+
+      // Reset file input
+      e.target.value = '';
+    } catch (error) {
+      toast.error('Error importing profile: ' + error.message);
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -454,6 +642,20 @@ function Settings() {
                 onChange={handleImportSettings}
                 style={{ display: 'none' }}
               />
+
+              <button
+                className="btn-primary"
+                onClick={() => profileFileInputRef.current?.click()}
+              >
+                Import Complete Profile
+              </button>
+              <input
+                ref={profileFileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportProfile}
+                style={{ display: 'none' }}
+              />
             </div>
           </div>
         </div>
@@ -549,6 +751,16 @@ function Settings() {
               onChange={(e) => handleChange('profile', 'annualExpenses', parseFloat(e.target.value))}
             />
             <small>Optional - leave blank if using Expenses module</small>
+          </div>
+
+          <div className="form-group">
+            <label>Annual Taxable Income ({settings.reportingCurrency})</label>
+            <input
+              type="number"
+              value={settings.profile.annualTaxableIncome ?? 0}
+              onChange={(e) => handleChange('profile', 'annualTaxableIncome', parseFloat(e.target.value) || 0)}
+            />
+            <small>Your annual taxable income for tax calculations</small>
           </div>
         </div>
       </div>

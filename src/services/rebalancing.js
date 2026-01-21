@@ -7,6 +7,7 @@ import {
   calculateCGT,
   calculateGrossAssets,
   formatCurrency,
+  getExchangeRates,
 } from '../utils/calculations';
 import { ASSET_CLASSES } from '../models/defaults';
 
@@ -18,7 +19,7 @@ import { ASSET_CLASSES } from '../models/defaults';
  * @returns {Array} Sorted array of recommendations
  */
 export const generateRebalancingAdvice = (assets, settings) => {
-  const exchangeRates = settings.currency?.exchangeRates || {};
+  const exchangeRates = getExchangeRates(settings);
   const { targetAllocation, thresholds, profile } = settings;
   const marginalTaxRate = profile?.marginalTaxRate || 39;
   const driftThreshold = thresholds?.rebalancingDrift || 5;

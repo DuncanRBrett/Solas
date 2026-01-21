@@ -45,6 +45,7 @@ export const DEFAULT_SETTINGS = {
     lifeExpectancy: 90,
     monthlySavings: 0,
     annualExpenses: 0, // Optional - can use Expenses module instead
+    annualTaxableIncome: 0, // Annual taxable income for tax calculations
     defaultCGT: 18, // % - Default capital gains tax rate (40% inclusion x 45% marginal)
     expectedInflation: 4.5, // % p.a. - Expected inflation rate
     incomeGrowth: 5.0, // % p.a. - Expected annual income growth rate
@@ -344,6 +345,15 @@ export const createDefaultAsset = () => ({
 
   // Advisor fee exclusion
   excludeFromAdvisorFee: false, // Set to true to exclude this asset from advisor fee calculations
+
+  // Patch 8: Liquidity for resilience scoring
+  // Most assets are liquid by default. Set to false for illiquid assets like:
+  // - Investment property (takes months to sell)
+  // - Private equity / unlisted shares
+  // - Art, collectibles, wine
+  // - Long-term fixed deposits with penalties
+  // Note: isLiquid = true means the asset can be sold within ~1 week at market price
+  isLiquid: true,
 
   // Metadata
   priceUrl: '', // Link to check price

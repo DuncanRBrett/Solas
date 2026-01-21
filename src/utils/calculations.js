@@ -314,11 +314,19 @@ export const calculateGainPercentage = (asset) => {
 
 /**
  * Calculate capital gains tax (South Africa)
- * CGT = (Gain × 40% inclusion rate × marginal tax rate)
+ * CGT = (Gain × inclusion rate × marginal tax rate)
+ *
+ * Patch 6: Now reads inclusionRate from taxConfig if available
+ *
+ * @param {number} gain - Capital gain amount
+ * @param {number} marginalTaxRate - Marginal tax rate as percentage (e.g., 45)
+ * @param {object} [taxConfig] - Optional tax configuration with cgt.inclusionRate
+ * @returns {number} CGT amount
  */
-export const calculateCGT = (gain, marginalTaxRate) => {
+export const calculateCGT = (gain, marginalTaxRate, taxConfig = null) => {
   if (gain <= 0) return 0;
-  const inclusionRate = 0.4; // 40% for individuals
+  // Patch 6: Read inclusionRate from taxConfig, fallback to 40% (SA default for individuals)
+  const inclusionRate = (taxConfig?.cgt?.inclusionRate ?? 40) / 100;
   return gain * inclusionRate * (marginalTaxRate / 100);
 };
 
@@ -510,6 +518,13 @@ export const detectConcentrationRisks = (assets, exchangeRates, thresholds) => {
 /**
  * Calculate portfolio-weighted expected return
  * (Only for investible assets)
+ *
+ * Patch 7: Respects asset-specific expectedReturn if set, otherwise uses asset class default
+ *
+ * @param {Array} assets - Array of asset objects
+ * @param {object} exchangeRates - Exchange rates for value calculation
+ * @param {object} expectedReturns - Default expected returns by asset class
+ * @returns {number} Weighted average expected return percentage
  */
 export const calculatePortfolioReturn = (assets, exchangeRates, expectedReturns) => {
   const investibleAssets = assets.filter((a) => a.assetType === 'Investible');
@@ -520,7 +535,10 @@ export const calculatePortfolioReturn = (assets, exchangeRates, expectedReturns)
   const weightedReturn = investibleAssets.reduce((sum, asset) => {
     const value = calculateAssetValueZAR(asset, exchangeRates);
     const weight = value / totalValue;
-    const returnRate = expectedReturns[asset.assetClass] || 0;
+    // Patch 7: Use asset-specific expected return if set, otherwise fall back to asset class default
+    const returnRate = (asset.expectedReturn !== null && asset.expectedReturn !== undefined)
+      ? asset.expectedReturn
+      : (expectedReturns[asset.assetClass] || 0);
     return sum + weight * returnRate;
   }, 0);
 

@@ -346,12 +346,42 @@ const useStore = create((set, get) => ({
 
   // Update settings
   updateSettings: (newSettings) => {
-    set((state) => ({
-      profile: {
-        ...state.profile,
-        settings: { ...state.profile.settings, ...newSettings },
-      },
-    }));
+    // Guard against undefined/null newSettings
+    if (!newSettings || typeof newSettings !== 'object') {
+      console.warn('updateSettings called with invalid argument:', newSettings);
+      return;
+    }
+
+    set((state) => {
+      // Deep merge settings to preserve nested objects like 'profile'
+      const currentSettings = state.profile.settings || {};
+      const mergedSettings = { ...currentSettings };
+
+      // Iterate over new settings and deep merge nested objects
+      Object.keys(newSettings).forEach(key => {
+        if (
+          typeof newSettings[key] === 'object' &&
+          newSettings[key] !== null &&
+          !Array.isArray(newSettings[key]) &&
+          typeof currentSettings[key] === 'object' &&
+          currentSettings[key] !== null &&
+          !Array.isArray(currentSettings[key])
+        ) {
+          // Deep merge nested objects (like 'profile', 'thresholds', etc.)
+          mergedSettings[key] = { ...currentSettings[key], ...newSettings[key] };
+        } else {
+          // Direct assignment for primitives, arrays, and null values
+          mergedSettings[key] = newSettings[key];
+        }
+      });
+
+      return {
+        profile: {
+          ...state.profile,
+          settings: mergedSettings,
+        },
+      };
+    });
     get().saveProfile();
   },
 
@@ -392,6 +422,32 @@ const useStore = create((set, get) => ({
         assets: assets,
       },
     }));
+    get().saveProfile();
+  },
+
+  // Replace entire profile data (used for complete profile import/restore)
+  // This is a bulk update that replaces multiple sections of the profile at once
+  replaceProfileData: (data) => {
+    set((state) => {
+      const newProfile = { ...state.profile };
+
+      // Only update fields that are provided
+      if (data.assets !== undefined) newProfile.assets = data.assets;
+      if (data.liabilities !== undefined) newProfile.liabilities = data.liabilities;
+      if (data.income !== undefined) newProfile.income = data.income;
+      if (data.expenses !== undefined) newProfile.expenses = data.expenses;
+      if (data.expenseCategories !== undefined) newProfile.expenseCategories = data.expenseCategories;
+      if (data.ageBasedExpensePlan !== undefined) newProfile.ageBasedExpensePlan = data.ageBasedExpensePlan;
+      if (data.scenarios !== undefined) newProfile.scenarios = data.scenarios;
+      if (data.history !== undefined) newProfile.history = data.history;
+      if (data.settings !== undefined) {
+        newProfile.settings = { ...newProfile.settings, ...data.settings };
+      }
+
+      newProfile.updatedAt = new Date().toISOString();
+
+      return { profile: newProfile };
+    });
     get().saveProfile();
   },
 

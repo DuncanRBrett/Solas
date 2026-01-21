@@ -5,7 +5,6 @@ import {
   calculateAssetValue,
   calculateSafeWithdrawal,
   formatInReportingCurrency,
-  detectConcentrationRisks,
   getExchangeRates,
   toReportingCurrency,
   calculateAllocation,
@@ -122,18 +121,6 @@ function Dashboard() {
     };
   }, [assetValues.investibleAssets, withdrawalRates, annualExpenses]);
 
-  // 6. Calculate concentration risks (depends on assets and thresholds)
-  const risks = useMemo(() => {
-    // For concentration risks, we need the legacy format temporarily
-    // TODO: Update detectConcentrationRisks to use new format
-    const legacyExchangeRates = settings?.currency?.exchangeRates ?? {
-      'USD/ZAR': exchangeRates.USD ?? DEFAULT_EXCHANGE_RATES.USD,
-      'EUR/ZAR': exchangeRates.EUR ?? DEFAULT_EXCHANGE_RATES.EUR,
-      'GBP/ZAR': exchangeRates.GBP ?? DEFAULT_EXCHANGE_RATES.GBP,
-    };
-    return detectConcentrationRisks(assets, legacyExchangeRates, settings?.thresholds ?? DEFAULT_SETTINGS.thresholds);
-  }, [assets, settings, exchangeRates]);
-
   // Combine all stats for easy access in JSX
   const stats = useMemo(() => ({
     ...assetValues,
@@ -146,8 +133,7 @@ function Dashboard() {
     exchangeRates,
     fmt,
     withdrawals,
-    risks,
-  }), [assetValues, liabilityValues, netWorthValues, cgtValues, annualExpenses, withdrawalRates, reportingCurrency, exchangeRates, fmt, withdrawals, risks]);
+  }), [assetValues, liabilityValues, netWorthValues, cgtValues, annualExpenses, withdrawalRates, reportingCurrency, exchangeRates, fmt, withdrawals]);
 
   // Save current stats to history
   const handleSaveToHistory = () => {
@@ -274,64 +260,12 @@ function Dashboard() {
           )}
         </div>
 
-        {/* Right Column - Quality Score and Alerts */}
+        {/* Right Column - Quality Score */}
         <div className="dashboard-right-column">
           {/* Portfolio Quality Card */}
           {stats.assetCount > 0 && (
             <PortfolioQualityCard />
           )}
-
-          {/* Concentration Alerts */}
-          <div className="dashboard-card">
-          <h3>Concentration Alerts</h3>
-          {stats.risks.length > 0 ? (
-            <div className="alerts-list">
-              {/* Single Asset Warnings */}
-              {stats.risks.filter(r => r.type === 'Single Asset').length > 0 && (
-                <div className="alert-section">
-                  <div className="alert-section-title warning">⚠ Single Asset Concentration</div>
-                  {stats.risks.filter(r => r.type === 'Single Asset').map((risk, i) => (
-                    <div key={i} className="alert-item">• {risk.name}: {risk.percentage}%</div>
-                  ))}
-                </div>
-              )}
-
-              {/* Asset Class Concentration */}
-              {stats.risks.filter(r => r.type === 'Asset Class').length > 0 && (
-                <div className="alert-section">
-                  <div className="alert-section-title success">✓ Asset Class Concentration</div>
-                  {stats.risks.filter(r => r.type === 'Asset Class').map((risk, i) => (
-                    <div key={i} className="alert-item">• All asset classes within healthy range</div>
-                  )).slice(0, 1)}
-                </div>
-              )}
-
-              {/* Currency Concentration */}
-              {stats.risks.filter(r => r.type === 'Currency').length > 0 ? (
-                <div className="alert-section">
-                  <div className="alert-section-title success">✓ Currency Concentration</div>
-                  <div className="alert-item">• Currency exposure well diversified</div>
-                </div>
-              ) : (
-                <div className="alert-section">
-                  <div className="alert-section-title success">✓ Currency Concentration</div>
-                  <div className="alert-item">• Currency exposure well diversified</div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="alerts-list">
-              <div className="alert-section">
-                <div className="alert-section-title success">✓ Asset Class Concentration</div>
-                <div className="alert-item">• All asset classes within healthy range</div>
-              </div>
-              <div className="alert-section">
-                <div className="alert-section-title success">✓ Currency Concentration</div>
-                <div className="alert-item">• Currency exposure well diversified</div>
-              </div>
-            </div>
-          )}
-          </div>
         </div>
       </div>
 
